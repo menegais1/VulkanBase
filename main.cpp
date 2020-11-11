@@ -32,20 +32,23 @@ struct QueueFamilyInfo {
 };
 
 struct PhysicalDeviceInfo {
-    VkPhysicalDevice physicalDevice;
     VkPhysicalDeviceFeatures physicalDeviceFeatures;
     VkPhysicalDeviceProperties physicalDeviceProperties;
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
-    std::vector<VkPresentModeKHR> surfacePresentMode;
     QueueFamilyInfo queueFamilyInfo;
+    std::vector<VkPresentModeKHR> surfacePresentMode;
     std::vector<VkSurfaceFormatKHR> surfaceFormats;
     std::vector<VkQueueFamilyProperties> queueFamilyProperties;
 };
 
-struct SwapchainInfo {
+struct PresentationEngineInfo {
+    unsigned int imageCount;
     VkSurfaceFormatKHR format;
     VkExtent2D extents;
     VkPresentModeKHR presentMode;
+};
+
+struct RenderizationStructures {
     std::vector<VkImage> images;
     std::vector<VkImageView> imageViews;
     std::vector<VkFramebuffer> frameBuffers;
@@ -59,8 +62,7 @@ struct VulkanHandles {
     VkRenderPass renderPass;
     VkSwapchainKHR swapchain;
     VkSurfaceKHR surface;
-    PhysicalDeviceInfo physicalDeviceInfo;
-    SwapchainInfo swapchainInfo;
+    VkPhysicalDevice physicalDevice;
 };
 
 std::vector<VkExtensionProperties> vulkanQueryInstanceExtensions() {
@@ -73,7 +75,7 @@ std::vector<VkExtensionProperties> vulkanQueryInstanceExtensions() {
     return extensions;
 }
 
-std::vector<VkExtensionProperties> vulkanQueryDeviceExtensions(VkPhysicalDevice vkPhysicalDevice) {
+std::vector<VkExtensionProperties> vulkanQueryDeviceExtensions(const VkPhysicalDevice vkPhysicalDevice) {
     unsigned int extensionCount = 0;
     vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, nullptr, &extensionCount, nullptr);
     std::vector<VkExtensionProperties> extensions(extensionCount);
@@ -93,7 +95,7 @@ std::vector<VkLayerProperties> vulkanQueryInstanceLayers() {
     return layers;
 }
 
-bool vulkanValidateLayers(std::vector<const char *> requiredLayers, std::vector<VkLayerProperties> layers) {
+bool vulkanValidateLayers(const std::vector<const char *> requiredLayers, const std::vector<VkLayerProperties> layers) {
     bool present = false;
     for (int i = 0; i < requiredLayers.size(); ++i) {
         for (int j = 0; j < layers.size(); ++j) {
@@ -108,8 +110,8 @@ bool vulkanValidateLayers(std::vector<const char *> requiredLayers, std::vector<
     return true;
 }
 
-bool vulkanValidateExtensions(std::vector<const char *> requiredExtensions,
-                              std::vector<VkExtensionProperties> extensions) {
+bool vulkanValidateExtensions(const std::vector<const char *> requiredExtensions,
+                              const std::vector<VkExtensionProperties> extensions) {
     bool present = false;
     for (int i = 0; i < requiredExtensions.size(); ++i) {
         for (int j = 0; j < extensions.size(); ++j) {
@@ -137,7 +139,7 @@ bool vulkanPrepareForCreateInstance() {
     return layersPresent && extensionsPresent;
 }
 
-void vulkanCreateInstance(VkInstance *instance) {
+VkInstance vulkanCreateInstance() {
     if (!vulkanPrepareForCreateInstance()) {
         throw std::runtime_error("Missing layers or extension in instance");
     }
@@ -155,12 +157,15 @@ void vulkanCreateInstance(VkInstance *instance) {
     vkInstanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
     vkInstanceCreateInfo.enabledLayerCount = instanceLayers.size();
     vkInstanceCreateInfo.ppEnabledLayerNames = instanceLayers.data();
-
-    VK_ASSERT(vkCreateInstance(&vkInstanceCreateInfo, nullptr, instance));
+    VkInstance instance;
+    VK_ASSERT(vkCreateInstance(&vkInstanceCreateInfo, nullptr, &instance));
+    return instance;
 }
 
-void vulkanCreateSurface(VkInstance instance, GLFWwindow *window, VkSurfaceKHR *vkSurfaceKhr) {
-    VK_ASSERT(glfwCreateWindowSurface(instance, window, nullptr, vkSurfaceKhr));
+VkSurfaceKHR vulkanCreateSurface(const VkInstance instance, GLFWwindow *window) {
+    VkSurfaceKHR vkSurfaceKhr;
+    VK_ASSERT(glfwCreateWindowSurface(instance, window, nullptr, &vkSurfaceKhr));
+    return vkSurfaceKhr;
 }
 
 void getPhysicalDevicesInfo(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurfaceKhr,
@@ -193,18 +198,20 @@ void getPhysicalDevicesInfo(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSu
     physicalDeviceInfo->surfacePresentMode = vkSurfacePresentMode;
 }
 
-void getQueueFamilyInfo(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurfaceKhr,
-                        PhysicalDeviceInfo physicalDeviceInfo, QueueFamilyInfo *queueFamilyInfo) {
+QueueFamilyInfo getQueueFamilyInfo(const VkPhysicalDevice vkPhysicalDevice, const VkSurfaceKHR vkSurfaceKhr,
+                                   const PhysicalDeviceInfo physicalDeviceInfo) {
+    QueueFamilyInfo queueFamilyInfo;
     for (int i = 0; i < physicalDeviceInfo.queueFamilyProperties.size(); ++i) {
         if (physicalDeviceInfo.queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
-            queueFamilyInfo->graphicsFamilyIndex = i;
+            queueFamilyInfo.graphicsFamilyIndex = i;
         VkBool32 hasPresentationCapability = VK_FALSE;
         vkGetPhysicalDeviceSurfaceSupportKHR(vkPhysicalDevice, i, vkSurfaceKhr, &hasPresentationCapability);
-        if (hasPresentationCapability) queueFamilyInfo->presentationFamilyIndex = i;
+        if (hasPresentationCapability) queueFamilyInfo.presentationFamilyIndex = i;
     }
+    return queueFamilyInfo;
 }
 
-int scorePhysicalDevices(PhysicalDeviceInfo physicalDeviceInfo) {
+int scorePhysicalDevices(const PhysicalDeviceInfo physicalDeviceInfo) {
     int score = 0;
 
     if (physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex == -1) {
@@ -221,7 +228,7 @@ int scorePhysicalDevices(PhysicalDeviceInfo physicalDeviceInfo) {
     return score;
 }
 
-void vulkanQueryPhysicalDevice(VulkanHandles vulkanHandles, PhysicalDeviceInfo *physicalDeviceInfo) {
+VkPhysicalDevice vulkanQueryPhysicalDevice(const VulkanHandles vulkanHandles, PhysicalDeviceInfo &physicalDeviceInfo) {
     unsigned int physicalDevicesCount = 0;
     vkEnumeratePhysicalDevices(vulkanHandles.instance, &physicalDevicesCount, nullptr);
     std::vector<VkPhysicalDevice> physicalDevices(physicalDevicesCount);
@@ -236,29 +243,30 @@ void vulkanQueryPhysicalDevice(VulkanHandles vulkanHandles, PhysicalDeviceInfo *
             break;
         }
         getPhysicalDevicesInfo(physicalDevices[i], vulkanHandles.surface, &physicalDeviceInfoList[i]);
-        getQueueFamilyInfo(physicalDevices[i], vulkanHandles.surface, physicalDeviceInfoList[i],
-                           &physicalDeviceInfoList[i].queueFamilyInfo);
+        physicalDeviceInfoList[i].queueFamilyInfo = getQueueFamilyInfo(physicalDevices[i], vulkanHandles.surface,
+                                                                       physicalDeviceInfoList[i]);
         int score = scorePhysicalDevices(physicalDeviceInfoList[i]);
         if (score > lastScore) {
             lastScore = score;
             lastScoreIndex = i;
         }
     }
-    physicalDeviceInfo->physicalDevice = physicalDevices[lastScoreIndex];
-    physicalDeviceInfo->queueFamilyInfo = physicalDeviceInfoList[lastScoreIndex].queueFamilyInfo;
-    physicalDeviceInfo->queueFamilyProperties = physicalDeviceInfoList[lastScoreIndex].queueFamilyProperties;
-    physicalDeviceInfo->physicalDeviceProperties = physicalDeviceInfoList[lastScoreIndex].physicalDeviceProperties;
-    physicalDeviceInfo->physicalDeviceFeatures = physicalDeviceInfoList[lastScoreIndex].physicalDeviceFeatures;
-    physicalDeviceInfo->surfaceFormats = physicalDeviceInfoList[lastScoreIndex].surfaceFormats;
-    physicalDeviceInfo->surfaceCapabilities = physicalDeviceInfoList[lastScoreIndex].surfaceCapabilities;
-    physicalDeviceInfo->surfacePresentMode = physicalDeviceInfoList[lastScoreIndex].surfacePresentMode;
+    physicalDeviceInfo.queueFamilyInfo = physicalDeviceInfoList[lastScoreIndex].queueFamilyInfo;
+    physicalDeviceInfo.queueFamilyProperties = physicalDeviceInfoList[lastScoreIndex].queueFamilyProperties;
+    physicalDeviceInfo.physicalDeviceProperties = physicalDeviceInfoList[lastScoreIndex].physicalDeviceProperties;
+    physicalDeviceInfo.physicalDeviceFeatures = physicalDeviceInfoList[lastScoreIndex].physicalDeviceFeatures;
+    physicalDeviceInfo.surfaceFormats = physicalDeviceInfoList[lastScoreIndex].surfaceFormats;
+    physicalDeviceInfo.surfaceCapabilities = physicalDeviceInfoList[lastScoreIndex].surfaceCapabilities;
+    physicalDeviceInfo.surfacePresentMode = physicalDeviceInfoList[lastScoreIndex].surfacePresentMode;
+
+    return physicalDevices[lastScoreIndex];
 }
 
-void vulkanCreateLogicalDevice(VulkanHandles vulkanHandles, VkDevice *vkDevice) {
+VkDevice vulkanCreateLogicalDevice(const VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo) {
     float priority = 1.00;
 
-    std::set<int> queueFamilyIndex = {vulkanHandles.physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex,
-                                      vulkanHandles.physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex};
+    std::set<int> queueFamilyIndex = {physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex,
+                                      physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex};
     VkDeviceQueueCreateInfo vkDeviceQueueCreateInfo[queueFamilyIndex.size()];
     int count = 0;
     for (auto index : queueFamilyIndex) {
@@ -282,90 +290,106 @@ void vulkanCreateLogicalDevice(VulkanHandles vulkanHandles, VkDevice *vkDevice) 
     vkDeviceCreateInfo.ppEnabledLayerNames = nullptr;
     vkDeviceCreateInfo.enabledExtensionCount = deviceExtensions.size();
     vkDeviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
-
-    VK_ASSERT(vkCreateDevice(vulkanHandles.physicalDeviceInfo.physicalDevice, &vkDeviceCreateInfo, nullptr, vkDevice));
+    VkDevice vkDevice;
+    VK_ASSERT(vkCreateDevice(vulkanHandles.physicalDevice, &vkDeviceCreateInfo, nullptr, &vkDevice));
+    return vkDevice;
 }
 
-void vulkanCreateCommandPool(VulkanHandles vulkanHandles, int queueFamilyIndex, VkCommandPool *vkCommandPool) {
+VkCommandPool vulkanCreateCommandPool(const VulkanHandles vulkanHandles, const int queueFamilyIndex) {
     VkCommandPoolCreateInfo vkCommandPoolCreateInfo{};
     vkCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     vkCommandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
     vkCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    VK_ASSERT(vkCreateCommandPool(vulkanHandles.device, &vkCommandPoolCreateInfo, nullptr, vkCommandPool));
+    VkCommandPool vkCommandPool;
+    VK_ASSERT(vkCreateCommandPool(vulkanHandles.device, &vkCommandPoolCreateInfo, nullptr, &vkCommandPool));
+    return vkCommandPool;
 }
 
-void vulkanCreateCommandBuffers(VulkanHandles vulkanHandles, VkCommandPool vkCommandPool, int commandBufferCount,
-                                VkCommandBuffer *vkCommandBuffer) {
+std::vector<VkCommandBuffer>
+vulkanCreateCommandBuffers(const VulkanHandles vulkanHandles, const VkCommandPool vkCommandPool,
+                           const int commandBufferCount) {
+    std::vector<VkCommandBuffer> commandBuffers(commandBufferCount);
     VkCommandBufferAllocateInfo vkCommandBufferAllocateInfo{};
     vkCommandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     vkCommandBufferAllocateInfo.commandPool = vkCommandPool;
     vkCommandBufferAllocateInfo.commandBufferCount = commandBufferCount;
     vkCommandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    VK_ASSERT(vkAllocateCommandBuffers(vulkanHandles.device, &vkCommandBufferAllocateInfo, vkCommandBuffer));
-
+    VkCommandBuffer vkCommandBuffer;
+    VK_ASSERT(vkAllocateCommandBuffers(vulkanHandles.device, &vkCommandBufferAllocateInfo, commandBuffers.data()));
+    return commandBuffers;
 }
 
-void vulkanCreateFrameBuffer(VulkanHandles vulkanHandles, VkImageView *imageView, VkFramebuffer *vkFramebuffer) {
+VkFramebuffer
+vulkanCreateFrameBuffer(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo,
+                        const VkImageView imageView) {
     VkFramebufferCreateInfo vkFramebufferCreateInfo{};
     vkFramebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     vkFramebufferCreateInfo.attachmentCount = 1;
-    vkFramebufferCreateInfo.pAttachments = imageView;
+    vkFramebufferCreateInfo.pAttachments = &imageView;
     vkFramebufferCreateInfo.renderPass = vulkanHandles.renderPass;
-    vkFramebufferCreateInfo.width = vulkanHandles.swapchainInfo.extents.width;
-    vkFramebufferCreateInfo.height = vulkanHandles.swapchainInfo.extents.height;
+    vkFramebufferCreateInfo.width = presentationEngineInfo.extents.width;
+    vkFramebufferCreateInfo.height = presentationEngineInfo.extents.height;
     vkFramebufferCreateInfo.layers = 1;
-
-    VK_ASSERT(vkCreateFramebuffer(vulkanHandles.device, &vkFramebufferCreateInfo, nullptr, vkFramebuffer));
+    VkFramebuffer vkFramebuffer;
+    VK_ASSERT(vkCreateFramebuffer(vulkanHandles.device, &vkFramebufferCreateInfo, nullptr, &vkFramebuffer));
+    return vkFramebuffer;
 }
 
-VkPresentModeKHR vulkanGetSwapchainPresentMode(VulkanHandles vulkanHandles) {
-    for (auto presentMode: vulkanHandles.physicalDeviceInfo.surfacePresentMode) {
+VkPresentModeKHR
+vulkanGetSwapchainPresentMode(const VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo) {
+    for (auto presentMode: physicalDeviceInfo.surfacePresentMode) {
         if (presentMode == VK_PRESENT_MODE_FIFO_KHR) return presentMode;
     }
-    return vulkanHandles.physicalDeviceInfo.surfacePresentMode[0];
+    return physicalDeviceInfo.surfacePresentMode[0];
 }
 
-VkSurfaceFormatKHR vulkanGetSwapchainImageFormat(VulkanHandles vulkanHandles) {
-    for (auto imageFormat: vulkanHandles.physicalDeviceInfo.surfaceFormats) {
+VkSurfaceFormatKHR
+vulkanGetSwapchainImageFormat(const VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo) {
+    for (auto imageFormat: physicalDeviceInfo.surfaceFormats) {
         if (imageFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
             imageFormat.colorSpace == VK_COLORSPACE_SRGB_NONLINEAR_KHR)
             return imageFormat;
     }
-    return vulkanHandles.physicalDeviceInfo.surfaceFormats[0];
+    return physicalDeviceInfo.surfaceFormats[0];
 }
 
-VkExtent2D vulkanGetSwapchainImageExtent(VulkanHandles vulkanHandles) {
-    return vulkanHandles.physicalDeviceInfo.surfaceCapabilities.minImageExtent;
+VkExtent2D
+vulkanGetSwapchainImageExtent(const VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo) {
+    return physicalDeviceInfo.surfaceCapabilities.minImageExtent;
 }
 
-void vulkanFillSwapchainInfo(VulkanHandles vulkanHandles, SwapchainInfo *swapchainInfo) {
-    swapchainInfo->format = vulkanGetSwapchainImageFormat(vulkanHandles);
-    swapchainInfo->presentMode = vulkanGetSwapchainPresentMode(vulkanHandles);
-    swapchainInfo->extents = vulkanGetSwapchainImageExtent(vulkanHandles);
+PresentationEngineInfo
+vulkanGetPresentationEngineInfo(VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo) {
+    PresentationEngineInfo presentationEngineInfo{};
+    presentationEngineInfo.format = vulkanGetSwapchainImageFormat(vulkanHandles, physicalDeviceInfo);
+    presentationEngineInfo.presentMode = vulkanGetSwapchainPresentMode(vulkanHandles, physicalDeviceInfo);
+    presentationEngineInfo.extents = vulkanGetSwapchainImageExtent(vulkanHandles, physicalDeviceInfo);
+    return presentationEngineInfo;
 }
 
-void vulkanCreateSwapchain(VulkanHandles vulkanHandles, VkSwapchainKHR *vkSwapchainKhr) {
+VkSwapchainKHR vulkanCreateSwapchain(VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo,
+                                     const PresentationEngineInfo presentationEngineInfo) {
 
     VkSwapchainCreateInfoKHR vkSwapchainCreateInfoKhr{};
     vkSwapchainCreateInfoKhr.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     vkSwapchainCreateInfoKhr.oldSwapchain = VK_NULL_HANDLE;
     vkSwapchainCreateInfoKhr.surface = vulkanHandles.surface;
-    vkSwapchainCreateInfoKhr.presentMode = vulkanHandles.swapchainInfo.presentMode;
-    vkSwapchainCreateInfoKhr.imageFormat = vulkanHandles.swapchainInfo.format.format;
-    vkSwapchainCreateInfoKhr.imageColorSpace = vulkanHandles.swapchainInfo.format.colorSpace;
+    vkSwapchainCreateInfoKhr.presentMode = presentationEngineInfo.presentMode;
+    vkSwapchainCreateInfoKhr.imageFormat = presentationEngineInfo.format.format;
+    vkSwapchainCreateInfoKhr.imageColorSpace = presentationEngineInfo.format.colorSpace;
     vkSwapchainCreateInfoKhr.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    vkSwapchainCreateInfoKhr.minImageCount = vulkanHandles.physicalDeviceInfo.surfaceCapabilities.minImageCount;
+    vkSwapchainCreateInfoKhr.minImageCount = physicalDeviceInfo.surfaceCapabilities.minImageCount;
     vkSwapchainCreateInfoKhr.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     vkSwapchainCreateInfoKhr.imageArrayLayers = 1;
     vkSwapchainCreateInfoKhr.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     vkSwapchainCreateInfoKhr.clipped = VK_TRUE;
-    vkSwapchainCreateInfoKhr.imageExtent = vulkanHandles.swapchainInfo.extents;
+    vkSwapchainCreateInfoKhr.imageExtent = presentationEngineInfo.extents;
 
     unsigned int queueFamilyIndices[2] = {
-            (unsigned int) vulkanHandles.physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex,
-            (unsigned int) vulkanHandles.physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex};
-    if (vulkanHandles.physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex !=
-        vulkanHandles.physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex) {
+            (unsigned int) physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex,
+            (unsigned int) physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex};
+    if (physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex !=
+        physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex) {
         vkSwapchainCreateInfoKhr.queueFamilyIndexCount = 2;
         vkSwapchainCreateInfoKhr.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         vkSwapchainCreateInfoKhr.pQueueFamilyIndices = queueFamilyIndices;
@@ -374,26 +398,34 @@ void vulkanCreateSwapchain(VulkanHandles vulkanHandles, VkSwapchainKHR *vkSwapch
         vkSwapchainCreateInfoKhr.queueFamilyIndexCount = 0;
         vkSwapchainCreateInfoKhr.pQueueFamilyIndices = nullptr;
     }
-
-
-    VK_ASSERT(vkCreateSwapchainKHR(vulkanHandles.device, &vkSwapchainCreateInfoKhr, nullptr, vkSwapchainKhr));
-
+    VkSwapchainKHR vkSwapchainKhr;
+    VK_ASSERT(vkCreateSwapchainKHR(vulkanHandles.device, &vkSwapchainCreateInfoKhr, nullptr, &vkSwapchainKhr));
+    return vkSwapchainKhr;
 
 }
 
-void vulkanCreateSwapchainImageViews(VulkanHandles vulkanHandles, SwapchainInfo *swapchainInfo) {
+
+std::vector<VkImage>
+vulkanGetSwapchainImages(const VulkanHandles vulkanHandles, PresentationEngineInfo &presentationEngineInfo) {
     unsigned int imageCount = 0;
     vkGetSwapchainImagesKHR(vulkanHandles.device, vulkanHandles.swapchain, &imageCount, nullptr);
-    swapchainInfo->images.resize(imageCount);
-    swapchainInfo->imageViews.resize(imageCount);
-    vkGetSwapchainImagesKHR(vulkanHandles.device, vulkanHandles.swapchain, &imageCount,
-                            swapchainInfo->images.data());
-    for (int i = 0; i < imageCount; ++i) {
+    std::vector<VkImage> images(imageCount);
+    vkGetSwapchainImagesKHR(vulkanHandles.device, vulkanHandles.swapchain, &imageCount, images.data());
+    presentationEngineInfo.imageCount = imageCount;
+    return images;
+}
+
+std::vector<VkImageView> vulkanCreateSwapchainImageViews(const VulkanHandles vulkanHandles,
+                                                         const PresentationEngineInfo presentationEngineInfo,
+                                                         const std::vector<VkImage> images) {
+
+    std::vector<VkImageView> imageViews(presentationEngineInfo.imageCount);
+    for (int i = 0; i < presentationEngineInfo.imageCount; ++i) {
         VkImageViewCreateInfo vkImageViewCreateInfo{};
         vkImageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vkImageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vkImageViewCreateInfo.image = swapchainInfo->images[i];
-        vkImageViewCreateInfo.format = swapchainInfo->format.format;
+        vkImageViewCreateInfo.image = images[i];
+        vkImageViewCreateInfo.format = presentationEngineInfo.format.format;
         vkImageViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
         vkImageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
         vkImageViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -404,27 +436,28 @@ void vulkanCreateSwapchainImageViews(VulkanHandles vulkanHandles, SwapchainInfo 
         vkImageViewCreateInfo.subresourceRange.baseMipLevel = 0;
         vkImageViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         VK_ASSERT(vkCreateImageView(vulkanHandles.device, &vkImageViewCreateInfo, nullptr,
-                                    &swapchainInfo->imageViews[i]));
+                                    &imageViews[i]));
     }
+    return imageViews;
 }
 
-void vulkanCreateSwapchainFrameBuffers(VulkanHandles vulkanHandles, SwapchainInfo *swapchainInfo) {
-    swapchainInfo->frameBuffers.resize(swapchainInfo->images.size());
-
-    for (int i = 0; i < swapchainInfo->images.size(); ++i) {
-        vulkanCreateFrameBuffer(vulkanHandles, &swapchainInfo->imageViews[i], &swapchainInfo->frameBuffers[i]);
+std::vector<VkFramebuffer> vulkanCreateSwapchainFrameBuffers(const VulkanHandles vulkanHandles,
+                                                             const PresentationEngineInfo presentationEngineInfo,
+                                                             const std::vector<VkImageView> imageViews) {
+    std::vector<VkFramebuffer> frameBuffers(presentationEngineInfo.imageCount);
+    for (int i = 0; i < presentationEngineInfo.imageCount; ++i) {
+        frameBuffers[i] = vulkanCreateFrameBuffer(vulkanHandles, presentationEngineInfo, imageViews[i]);
     }
+    return frameBuffers;
 }
 
-void
-vulkanCreateSwapchainCommandBuffers(VulkanHandles vulkanHandles, VkCommandPool vkCommandPool,
-                                    SwapchainInfo *swapchainInfo) {
-    swapchainInfo->commandBuffers.resize(swapchainInfo->images.size());
-    vulkanCreateCommandBuffers(vulkanHandles, vkCommandPool, swapchainInfo->images.size(),
-                               swapchainInfo->commandBuffers.data());
+std::vector<VkCommandBuffer> vulkanCreateSwapchainCommandBuffers(const VulkanHandles vulkanHandles,
+                                                                 const PresentationEngineInfo presentationEngineInfo,
+                                                                 const VkCommandPool vkCommandPool) {
+    return vulkanCreateCommandBuffers(vulkanHandles, vkCommandPool, presentationEngineInfo.imageCount);
 }
 
-std::vector<char> vulkanLoadShader(std::string filename) {
+std::vector<char> vulkanLoadShader(const std::string filename) {
     std::ifstream file(filename, std::ios::binary | std::ios::in | std::ios::ate);
     if (!file.is_open()) {
         std::cerr << "CANNOT OPEN SHADER FILE" << std::endl;
@@ -439,7 +472,7 @@ std::vector<char> vulkanLoadShader(std::string filename) {
     return buffer;
 }
 
-VkShaderModule vulkanCreateShaderModule(VkDevice vkDevice, std::vector<char> shaderBytes) {
+VkShaderModule vulkanCreateShaderModule(const VulkanHandles vulkanHandles, const std::vector<char> shaderBytes) {
     VkShaderModuleCreateInfo vkShaderModuleCreateInfo{};
     vkShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     vkShaderModuleCreateInfo.pNext = nullptr;
@@ -447,13 +480,14 @@ VkShaderModule vulkanCreateShaderModule(VkDevice vkDevice, std::vector<char> sha
     vkShaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t *>(shaderBytes.data());
 
     VkShaderModule shaderModule;
-    VK_ASSERT(vkCreateShaderModule(vkDevice, &vkShaderModuleCreateInfo, nullptr, &shaderModule));
+    VK_ASSERT(vkCreateShaderModule(vulkanHandles.device, &vkShaderModuleCreateInfo, nullptr, &shaderModule));
     return shaderModule;
 }
 
-void vulkanCreateRenderPass(VulkanHandles vulkanHandles, VkRenderPass *vkRenderPass) {
+VkRenderPass
+vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo) {
     VkAttachmentDescription vkAttachmentDescription{};
-    vkAttachmentDescription.format = vulkanHandles.swapchainInfo.format.format;
+    vkAttachmentDescription.format = presentationEngineInfo.format.format;
     vkAttachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     vkAttachmentDescription.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     vkAttachmentDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -493,13 +527,14 @@ void vulkanCreateRenderPass(VulkanHandles vulkanHandles, VkRenderPass *vkRenderP
     vkRenderPassCreateInfo.pAttachments = &vkAttachmentDescription;
     vkRenderPassCreateInfo.dependencyCount = 1;
     vkRenderPassCreateInfo.pDependencies = &vkSubpassDependency;
-
-    VK_ASSERT(vkCreateRenderPass(vulkanHandles.device, &vkRenderPassCreateInfo, nullptr, vkRenderPass));
-
+    VkRenderPass vkRenderPass;
+    VK_ASSERT(vkCreateRenderPass(vulkanHandles.device, &vkRenderPassCreateInfo, nullptr, &vkRenderPass));
+    return vkRenderPass;
 }
 
-void vulkanCreatePipeline(VulkanHandles vulkanHandles, VkShaderModule vertexShaderModule,
-                          VkShaderModule fragmentShaderModule, VkPipeline *vkPipeline) {
+VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo,
+                                const VkShaderModule vertexShaderModule,
+                                const VkShaderModule fragmentShaderModule) {
 
     VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo{};
     vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -524,15 +559,15 @@ void vulkanCreatePipeline(VulkanHandles vulkanHandles, VkShaderModule vertexShad
     vkPipelineInputAssemblyStateCreateInfo.primitiveRestartEnable = VK_FALSE;
 
     VkViewport vkViewport{};
-    vkViewport.width = vulkanHandles.swapchainInfo.extents.width;
-    vkViewport.height = vulkanHandles.swapchainInfo.extents.height;
+    vkViewport.width = presentationEngineInfo.extents.width;
+    vkViewport.height = presentationEngineInfo.extents.height;
     vkViewport.x = vkViewport.y = 0;
     vkViewport.minDepth = 0.0;
     vkViewport.maxDepth = 1.0;
 
     VkRect2D vkScissor{};
     vkScissor.offset = {0, 0};
-    vkScissor.extent = vulkanHandles.swapchainInfo.extents;
+    vkScissor.extent = presentationEngineInfo.extents;
 
     VkPipelineViewportStateCreateInfo vkPipelineViewportStateCreateInfo{};
     vkPipelineViewportStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -604,19 +639,18 @@ void vulkanCreatePipeline(VulkanHandles vulkanHandles, VkShaderModule vertexShad
     vkGraphicsPipelineCreateInfo.pDynamicState = nullptr;
     vkGraphicsPipelineCreateInfo.layout = vkPipelineLayout;
 
-
+    VkPipeline vkPipeline;
     VK_ASSERT(vkCreateGraphicsPipelines(vulkanHandles.device, VK_NULL_HANDLE, 1,
-                                        &vkGraphicsPipelineCreateInfo, nullptr, vkPipeline));
-
+                                        &vkGraphicsPipelineCreateInfo, nullptr, &vkPipeline));
+    return vkPipeline;
 }
 
-void vulkanCreateSemaphore(VulkanHandles vulkanHandles, VkSemaphore *vkSemaphore) {
+VkSemaphore vulkanCreateSemaphore(VulkanHandles vulkanHandles) {
     VkSemaphoreCreateInfo vkSemaphoreCreateInfo{};
     vkSemaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    if (vkCreateSemaphore(vulkanHandles.device, &vkSemaphoreCreateInfo, nullptr, vkSemaphore) !=
-        VK_SUCCESS) {
-        throw std::runtime_error("Unable to create semaphore");
-    }
+    VkSemaphore vkSemaphore;
+    VK_ASSERT(vkCreateSemaphore(vulkanHandles.device, &vkSemaphoreCreateInfo, nullptr, &vkSemaphore));
+    return vkSemaphore;
 }
 
 int main() {
@@ -626,44 +660,50 @@ int main() {
 
     GLFWwindow *window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan HelloTriangle", nullptr, nullptr);
     VulkanHandles vulkanHandles{};
+    PhysicalDeviceInfo physicalDeviceInfo;
+    PresentationEngineInfo presentationEngineInfo;
+    RenderizationStructures renderizationStructures{};
     VkCommandPool vkGraphicsPool;
     VkCommandPool vkPresentationPool;
     VkCommandBuffer vkPresentationBuffer;
     VkSemaphore getImageSemaphore{};
     VkSemaphore presentImageSemaphore{};
     VkQueue graphicsQueue, presentationQueue;
-    vulkanCreateInstance(&vulkanHandles.instance);
-    vulkanCreateSurface(vulkanHandles.instance, window, &vulkanHandles.surface);
-    vulkanQueryPhysicalDevice(vulkanHandles, &vulkanHandles.physicalDeviceInfo);
-    vulkanCreateLogicalDevice(vulkanHandles, &vulkanHandles.device);
-    vulkanCreateCommandPool(vulkanHandles, vulkanHandles.physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex,
-                            &vkGraphicsPool);
-    vulkanCreateCommandPool(vulkanHandles, vulkanHandles.physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex,
-                            &vkPresentationPool);
-    vulkanCreateCommandBuffers(vulkanHandles, vkPresentationPool, 1, &vkPresentationBuffer);
-    vulkanFillSwapchainInfo(vulkanHandles, &vulkanHandles.swapchainInfo);
-    vulkanCreateSwapchain(vulkanHandles, &vulkanHandles.swapchain);
-    vulkanCreateSwapchainImageViews(vulkanHandles, &vulkanHandles.swapchainInfo);
-    vulkanCreateSwapchainCommandBuffers(vulkanHandles, vkGraphicsPool, &vulkanHandles.swapchainInfo);
-    vulkanCreateRenderPass(vulkanHandles, &vulkanHandles.renderPass);
-    vulkanCreateSwapchainFrameBuffers(vulkanHandles, &vulkanHandles.swapchainInfo);
+    vulkanHandles.instance = vulkanCreateInstance();
+    vulkanHandles.surface = vulkanCreateSurface(vulkanHandles.instance, window);
+    vulkanHandles.physicalDevice = vulkanQueryPhysicalDevice(vulkanHandles, physicalDeviceInfo);
+    vulkanHandles.device = vulkanCreateLogicalDevice(vulkanHandles, physicalDeviceInfo);
+    vkGraphicsPool = vulkanCreateCommandPool(vulkanHandles, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
+    vkPresentationPool = vulkanCreateCommandPool(vulkanHandles,
+                                                 physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex);
+    vkPresentationBuffer = vulkanCreateCommandBuffers(vulkanHandles, vkPresentationPool, 1)[0];
+    presentationEngineInfo = vulkanGetPresentationEngineInfo(vulkanHandles, physicalDeviceInfo);
+    vulkanHandles.swapchain = vulkanCreateSwapchain(vulkanHandles, physicalDeviceInfo, presentationEngineInfo);
+    renderizationStructures.images = vulkanGetSwapchainImages(vulkanHandles, presentationEngineInfo);
+    renderizationStructures.imageViews = vulkanCreateSwapchainImageViews(vulkanHandles, presentationEngineInfo,
+                                                                         renderizationStructures.images);
+    renderizationStructures.commandBuffers = vulkanCreateSwapchainCommandBuffers(vulkanHandles, presentationEngineInfo,
+                                                                                 vkGraphicsPool);
+    vulkanHandles.renderPass = vulkanCreateRenderPass(vulkanHandles, presentationEngineInfo);
+    renderizationStructures.frameBuffers = vulkanCreateSwapchainFrameBuffers(vulkanHandles, presentationEngineInfo,
+                                                                             renderizationStructures.imageViews);
 
     auto vert = vulkanLoadShader("../Shaders/vert.spv");
     auto frag = vulkanLoadShader("../Shaders/frag.spv");
-    auto vertModule = vulkanCreateShaderModule(vulkanHandles.device, vert);
-    auto fragModule = vulkanCreateShaderModule(vulkanHandles.device, frag);
-    vulkanCreatePipeline(vulkanHandles, vertModule, fragModule, &vulkanHandles.pipeline);
-    vulkanCreateSemaphore(vulkanHandles, &getImageSemaphore);
-    vulkanCreateSemaphore(vulkanHandles, &presentImageSemaphore);
+    auto vertModule = vulkanCreateShaderModule(vulkanHandles, vert);
+    auto fragModule = vulkanCreateShaderModule(vulkanHandles, frag);
+    vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo, vertModule, fragModule);
+    getImageSemaphore = vulkanCreateSemaphore(vulkanHandles);
+    presentImageSemaphore = vulkanCreateSemaphore(vulkanHandles);
 
-    vkGetDeviceQueue(vulkanHandles.device, vulkanHandles.physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex, 0,
+    vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex, 0,
                      &graphicsQueue);
-    vkGetDeviceQueue(vulkanHandles.device, vulkanHandles.physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex, 0,
+    vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex, 0,
                      &presentationQueue);
 
 
     VkRect2D viewRect{};
-    viewRect.extent = vulkanHandles.swapchainInfo.extents;
+    viewRect.extent = presentationEngineInfo.extents;
     viewRect.offset = {0, 0};
     VkClearValue vkClearValue = {1.0, 0.0, 0.0, 1.0};
     VkFence vkFence{};
@@ -690,14 +730,14 @@ int main() {
         VkRenderPassBeginInfo vkRenderPassBeginInfo{};
         vkRenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         vkRenderPassBeginInfo.renderPass = vulkanHandles.renderPass;
-        vkRenderPassBeginInfo.framebuffer = vulkanHandles.swapchainInfo.frameBuffers[imageIndex];
+        vkRenderPassBeginInfo.framebuffer = renderizationStructures.frameBuffers[imageIndex];
         vkRenderPassBeginInfo.renderArea = viewRect;
         vkRenderPassBeginInfo.clearValueCount = 1;
         vkRenderPassBeginInfo.pClearValues = &vkClearValue;
 
         VkCommandBufferBeginInfo vkCommandBufferBeginInfo{};
         vkCommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        VkCommandBuffer graphicsBuffer = vulkanHandles.swapchainInfo.commandBuffers[imageIndex];
+        VkCommandBuffer graphicsBuffer = renderizationStructures.commandBuffers[imageIndex];
         vkBeginCommandBuffer(graphicsBuffer, &vkCommandBufferBeginInfo);
         vkCmdBeginRenderPass(graphicsBuffer, &vkRenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(graphicsBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanHandles.pipeline);
