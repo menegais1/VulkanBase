@@ -22,6 +22,7 @@ struct PhysicalDeviceInfo {
     VkPhysicalDeviceProperties physicalDeviceProperties;
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
     QueueFamilyInfo queueFamilyInfo;
+    VkPhysicalDeviceMemoryProperties memoryProperties;
     std::vector<VkPresentModeKHR> surfacePresentMode;
     std::vector<VkSurfaceFormatKHR> surfaceFormats;
     std::vector<VkQueueFamilyProperties> queueFamilyProperties;

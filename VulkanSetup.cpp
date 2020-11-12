@@ -140,6 +140,11 @@ void VulkanSetup::vulkanGetPhysicalDevicesInfo(VkPhysicalDevice vkPhysicalDevice
     std::vector<VkQueueFamilyProperties> vkQueueFamilyProperties(queueFamilyPropertiesCount);
     vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, &queueFamilyPropertiesCount,
                                              vkQueueFamilyProperties.data());
+
+    VkPhysicalDeviceMemoryProperties vkPhysicalDeviceMemoryProperties;
+    vkGetPhysicalDeviceMemoryProperties(vkPhysicalDevice, &vkPhysicalDeviceMemoryProperties);
+
+    physicalDeviceInfo->memoryProperties = vkPhysicalDeviceMemoryProperties;
     physicalDeviceInfo->physicalDeviceFeatures = vkPhysicalDeviceFeatures;
     physicalDeviceInfo->physicalDeviceProperties = vkPhysicalDeviceProperties;
     physicalDeviceInfo->surfaceCapabilities = vkSurfaceCapabilities;
@@ -203,6 +208,7 @@ VulkanSetup::vulkanQueryPhysicalDevice(const VulkanHandles vulkanHandles, Physic
             lastScoreIndex = i;
         }
     }
+    physicalDeviceInfo.memoryProperties = physicalDeviceInfoList[lastScoreIndex].memoryProperties;
     physicalDeviceInfo.queueFamilyInfo = physicalDeviceInfoList[lastScoreIndex].queueFamilyInfo;
     physicalDeviceInfo.queueFamilyProperties = physicalDeviceInfoList[lastScoreIndex].queueFamilyProperties;
     physicalDeviceInfo.physicalDeviceProperties = physicalDeviceInfoList[lastScoreIndex].physicalDeviceProperties;

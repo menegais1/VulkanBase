@@ -10,10 +10,15 @@
 #include <cmath>
 #include "VulkanStructures.h"
 #include "VulkanSetup.h"
+#include <glm/vec3.hpp>
 
 int const WIDTH = 300;
 int const HEIGHT = 300;
 
+struct InputVertex {
+    glm::vec3 position;
+    glm::vec3 color;
+};
 
 VkCommandPool vulkanCreateCommandPool(const VulkanHandles vulkanHandles, const int queueFamilyIndex) {
     VkCommandPoolCreateInfo vkCommandPoolCreateInfo{};
@@ -234,13 +239,33 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     VkPipelineLayout vkPipelineLayout;
     VK_ASSERT(vkCreatePipelineLayout(vulkanHandles.device, &vkPipelineLayoutCreateInfo, nullptr, &vkPipelineLayout));
 
+    /////// Define Vertex Input
+    VkVertexInputBindingDescription vkVertexInputBindingDescription{};
+    vkVertexInputBindingDescription.binding = 0;
+    vkVertexInputBindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    vkVertexInputBindingDescription.stride = sizeof(InputVertex);
+
+    VkVertexInputAttributeDescription vkVertexAttrPosition{};
+    vkVertexAttrPosition.binding = 0;
+    vkVertexAttrPosition.offset = offsetof(struct InputVertex, position);
+    vkVertexAttrPosition.format = VK_FORMAT_R32G32B32_SFLOAT;
+    vkVertexAttrPosition.location = 0;
+
+    VkVertexInputAttributeDescription vkVertexAttrColor{};
+    vkVertexAttrColor.binding = 0;
+    vkVertexAttrColor.offset = offsetof(struct InputVertex, color);
+    vkVertexAttrColor.format = VK_FORMAT_R32G32B32_SFLOAT;
+    vkVertexAttrColor.location = 1;
+
+    std::vector<VkVertexInputAttributeDescription> vkDescriptions{vkVertexAttrPosition, vkVertexAttrColor};
     VkPipelineVertexInputStateCreateInfo vkVertexInputStateCreateInfo{};
     vkVertexInputStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vkVertexInputStateCreateInfo.vertexAttributeDescriptionCount = 0;
-    vkVertexInputStateCreateInfo.vertexBindingDescriptionCount = 0;
-    vkVertexInputStateCreateInfo.pVertexBindingDescriptions = nullptr;
-    vkVertexInputStateCreateInfo.pVertexAttributeDescriptions = nullptr;
+    vkVertexInputStateCreateInfo.vertexAttributeDescriptionCount = vkDescriptions.size();
+    vkVertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
+    vkVertexInputStateCreateInfo.pVertexBindingDescriptions = &vkVertexInputBindingDescription;
+    vkVertexInputStateCreateInfo.pVertexAttributeDescriptions = vkDescriptions.data();
 
+    ///////
     VkPipelineInputAssemblyStateCreateInfo vkPipelineInputAssemblyStateCreateInfo{};
     vkPipelineInputAssemblyStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     vkPipelineInputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -388,14 +413,62 @@ int main() {
     viewRect.offset = {0, 0};
     VkClearValue vkClearValue = {1.0, 0.0, 0.0, 1.0};
     VkFence vkFence{};
+    //we want to create the fence with the Create  Signaled flag, so we can wait on it before using it on a gpu command (for the first frame)
     VkFenceCreateInfo fenceCreateInfo = {};
     fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceCreateInfo.pNext = nullptr;
-
-    //we want to create the fence with the Create  Signaled flag, so we can wait on it before using it on a gpu command (for the first frame)
     fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
     VK_ASSERT(vkCreateFence(vulkanHandles.device, &fenceCreateInfo, nullptr, &vkFence));
+
+    std::vector<InputVertex> vertexBufferData{
+            {glm::vec3(0, 0, 0),     glm::vec3(1, 0, 0)},
+            {glm::vec3(0.5, 0, 0),   glm::vec3(1, 1, 0)},
+            {glm::vec3(0.5, 0.5, 0), glm::vec3(1, 0, 1)}
+    };
+
+    VkBufferCreateInfo vkVertexBufferCreateInfo{};
+    vkVertexBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vkVertexBufferCreateInfo.size = vertexBufferData.size() * sizeof(InputVertex);
+    vkVertexBufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    vkVertexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBuffer vkVertexBuffer;
+    VK_ASSERT(vkCreateBuffer(vulkanHandles.device, &vkVertexBufferCreateInfo, nullptr, &vkVertexBuffer));
+
+    VkMemoryRequirements vkVertexBufferMemoryRequirements{};
+    vkGetBufferMemoryRequirements(vulkanHandles.device, vkVertexBuffer, &vkVertexBufferMemoryRequirements);
+    VkDeviceMemory vkVertexBufferDeviceMemory{};
+    for (int i = 0; i < physicalDeviceInfo.memoryProperties.memoryTypeCount; ++i) {
+        VkMemoryType memoryType = physicalDeviceInfo.memoryProperties.memoryTypes[i];
+        if ((vkVertexBufferMemoryRequirements.memoryTypeBits & (1 << i)) &&
+            (memoryType.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+            VkMemoryAllocateInfo vkMemoryAllocateInfo{};
+            vkMemoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            vkMemoryAllocateInfo.memoryTypeIndex = i;
+            vkMemoryAllocateInfo.allocationSize = vkVertexBufferMemoryRequirements.size;
+            VK_ASSERT(vkAllocateMemory(vulkanHandles.device, &vkMemoryAllocateInfo, nullptr,
+                                       &vkVertexBufferDeviceMemory));
+            break;
+        }
+    }
+
+    VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, vkVertexBuffer, vkVertexBufferDeviceMemory, 0));
+
+    void *memoryPointer;
+    VK_ASSERT(vkMapMemory(vulkanHandles.device, vkVertexBufferDeviceMemory, 0, vkVertexBufferMemoryRequirements.size, 0,
+                          &memoryPointer));
+
+    memcpy(memoryPointer,vertexBufferData.data(), vkVertexBufferMemoryRequirements.size);
+
+    VkMappedMemoryRange vkMappedMemoryRange{};
+    vkMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    vkMappedMemoryRange.memory = vkVertexBufferDeviceMemory;
+    vkMappedMemoryRange.size = VK_WHOLE_SIZE;
+    vkMappedMemoryRange.offset = 0;
+
+    vkFlushMappedMemoryRanges(vulkanHandles.device, 1, &vkMappedMemoryRange);
+    memoryPointer = nullptr;
+    vkUnmapMemory(vulkanHandles.device, vkVertexBufferDeviceMemory);
+
     float frameNumber = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -422,6 +495,8 @@ int main() {
         vkBeginCommandBuffer(graphicsBuffer, &vkCommandBufferBeginInfo);
         vkCmdBeginRenderPass(graphicsBuffer, &vkRenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(graphicsBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanHandles.pipeline);
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(graphicsBuffer, 0, 1, &vkVertexBuffer, &offset);
         vkCmdDraw(graphicsBuffer, 3, 1, 0, 0);
         vkCmdEndRenderPass(graphicsBuffer);
         vkEndCommandBuffer(graphicsBuffer);
