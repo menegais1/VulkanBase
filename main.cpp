@@ -370,11 +370,63 @@ int vulkanGetMemoryTypeIndex(PhysicalDeviceInfo physicalDeviceInfo, uint32_t mem
                              VkMemoryPropertyFlagBits flagBits) {
     for (int i = 0; i < physicalDeviceInfo.memoryProperties.memoryTypeCount; ++i) {
         VkMemoryType memoryType = physicalDeviceInfo.memoryProperties.memoryTypes[i];
-        if ((memoryTypeBits & (1 << i)) && (memoryType.propertyFlags & flagBits)) {
+        if ((memoryTypeBits & (1 << i)) && (memoryType.propertyFlags & flagBits) == flagBits) {
             return i;
         }
     }
     return -1;
+}
+
+VkFence vulkanCreateFence(VulkanHandles vulkanHandles, VkFenceCreateFlags flags) {
+    VkFence vkFence{};
+    VkFenceCreateInfo fenceCreateInfo = {};
+    fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceCreateInfo.pNext = nullptr;
+    fenceCreateInfo.flags = flags;
+    VK_ASSERT(vkCreateFence(vulkanHandles.device, &fenceCreateInfo, nullptr, &vkFence));
+    return vkFence;
+}
+
+Buffer
+vulkanAllocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, uint32_t size,
+                              VkBufferUsageFlags usageFlags, VkMemoryPropertyFlagBits memoryPropertyFlags, void *data) {
+    Buffer buffer{};
+    VkBufferCreateInfo vkVertexBufferCreateInfo{};
+    vkVertexBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vkVertexBufferCreateInfo.size = size;
+    vkVertexBufferCreateInfo.usage = usageFlags;
+    vkVertexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VK_ASSERT(vkCreateBuffer(vulkanHandles.device, &vkVertexBufferCreateInfo, nullptr, &buffer.buffer));
+
+    vkGetBufferMemoryRequirements(vulkanHandles.device, buffer.buffer, &buffer.memoryRequirements);
+    VkMemoryAllocateInfo vkMemoryAllocateInfo{};
+    vkMemoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    vkMemoryAllocateInfo.memoryTypeIndex = vulkanGetMemoryTypeIndex(physicalDeviceInfo,
+                                                                    buffer.memoryRequirements.memoryTypeBits,
+                                                                    memoryPropertyFlags);
+    vkMemoryAllocateInfo.allocationSize = buffer.memoryRequirements.size;
+    VK_ASSERT(vkAllocateMemory(vulkanHandles.device, &vkMemoryAllocateInfo, nullptr,
+                               &buffer.deviceMemory));
+
+    VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, buffer.buffer, buffer.deviceMemory, 0));
+
+    void *memoryPointer;
+    VK_ASSERT(vkMapMemory(vulkanHandles.device, buffer.deviceMemory, 0, buffer.memoryRequirements.size, 0,
+                          &memoryPointer));
+
+    memcpy(memoryPointer, data, buffer.memoryRequirements.size);
+
+    VkMappedMemoryRange vkMappedMemoryRange{};
+    vkMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    vkMappedMemoryRange.memory = buffer.deviceMemory;
+    vkMappedMemoryRange.size = VK_WHOLE_SIZE;
+    vkMappedMemoryRange.offset = 0;
+
+    vkFlushMappedMemoryRanges(vulkanHandles.device, 1, &vkMappedMemoryRange);
+    memoryPointer = nullptr;
+    vkUnmapMemory(vulkanHandles.device, buffer.deviceMemory);
+
+    return buffer;
 }
 
 int main() {
@@ -423,13 +475,7 @@ int main() {
     viewRect.extent = presentationEngineInfo.extents;
     viewRect.offset = {0, 0};
     VkClearValue vkClearValue = {1.0, 0.0, 0.0, 1.0};
-    VkFence vkFence{};
-    //we want to create the fence with the Create  Signaled flag, so we can wait on it before using it on a gpu command (for the first frame)
-    VkFenceCreateInfo fenceCreateInfo = {};
-    fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceCreateInfo.pNext = nullptr;
-    fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    VK_ASSERT(vkCreateFence(vulkanHandles.device, &fenceCreateInfo, nullptr, &vkFence));
+    VkFence vkFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
 
     std::vector<InputVertex> vertexBufferData{
             {glm::vec3(0, 0, 0),     glm::vec3(1, 0, 0)},
@@ -438,85 +484,21 @@ int main() {
             {glm::vec3(0, 0.5, 0),   glm::vec3(1, 0, 1)}
     };
 
-    VkBufferCreateInfo vkVertexBufferCreateInfo{};
-    vkVertexBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vkVertexBufferCreateInfo.size = vertexBufferData.size() * sizeof(InputVertex);
-    vkVertexBufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    vkVertexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    VkBuffer vkVertexBuffer;
-    VK_ASSERT(vkCreateBuffer(vulkanHandles.device, &vkVertexBufferCreateInfo, nullptr, &vkVertexBuffer));
-
-    VkMemoryRequirements vkVertexBufferMemoryRequirements{};
-    vkGetBufferMemoryRequirements(vulkanHandles.device, vkVertexBuffer, &vkVertexBufferMemoryRequirements);
-    VkDeviceMemory vkVertexBufferDeviceMemory{};
-    VkMemoryAllocateInfo vkMemoryAllocateInfo{};
-    vkMemoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    vkMemoryAllocateInfo.memoryTypeIndex = vulkanGetMemoryTypeIndex(physicalDeviceInfo,
-                                                                    vkVertexBufferMemoryRequirements.memoryTypeBits,
-                                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-    vkMemoryAllocateInfo.allocationSize = vkVertexBufferMemoryRequirements.size;
-    VK_ASSERT(vkAllocateMemory(vulkanHandles.device, &vkMemoryAllocateInfo, nullptr,
-                               &vkVertexBufferDeviceMemory));
-
-    VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, vkVertexBuffer, vkVertexBufferDeviceMemory, 0));
-
-    void *memoryPointer;
-    VK_ASSERT(vkMapMemory(vulkanHandles.device, vkVertexBufferDeviceMemory, 0, vkVertexBufferMemoryRequirements.size, 0,
-                          &memoryPointer));
-
-    memcpy(memoryPointer, vertexBufferData.data(), vkVertexBufferMemoryRequirements.size);
-
-    VkMappedMemoryRange vkMappedMemoryRange{};
-    vkMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    vkMappedMemoryRange.memory = vkVertexBufferDeviceMemory;
-    vkMappedMemoryRange.size = VK_WHOLE_SIZE;
-    vkMappedMemoryRange.offset = 0;
-
-    vkFlushMappedMemoryRanges(vulkanHandles.device, 1, &vkMappedMemoryRange);
-    memoryPointer = nullptr;
-    vkUnmapMemory(vulkanHandles.device, vkVertexBufferDeviceMemory);
-
     std::vector<uint32_t> indexData = {
             0, 1, 2, 0, 2, 3
     };
 
-    VkBufferCreateInfo indexBufferCreateInfo{};
-    indexBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    indexBufferCreateInfo.size = indexData.size() * sizeof(uint32_t);
-    indexBufferCreateInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    Buffer vertexBuffer = vulkanAllocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
+                                                        sizeof(InputVertex) * vertexBufferData.size(),
+                                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                                                        (void *) vertexBufferData.data());
 
-    VkBuffer indexBuffer;
-
-    VK_ASSERT(vkCreateBuffer(vulkanHandles.device, &indexBufferCreateInfo, nullptr, &indexBuffer));
-
-    VkMemoryRequirements indexBufferRequirements;
-    vkGetBufferMemoryRequirements(vulkanHandles.device, indexBuffer, &indexBufferRequirements);
-
-    VkMemoryAllocateInfo indexBufferMemoryAllocate{};
-    indexBufferMemoryAllocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    indexBufferMemoryAllocate.memoryTypeIndex = vulkanGetMemoryTypeIndex(physicalDeviceInfo,
-                                                                         indexBufferRequirements.memoryTypeBits,
-                                                                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-    indexBufferMemoryAllocate.allocationSize = indexBufferRequirements.size;
-
-    VkDeviceMemory indexBufferMemory;
-    VK_ASSERT(vkAllocateMemory(vulkanHandles.device, &indexBufferMemoryAllocate, nullptr, &indexBufferMemory));
-    VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, indexBuffer, indexBufferMemory, 0));
-
-    void *indexBufferPointer;
-    VK_ASSERT(vkMapMemory(vulkanHandles.device, indexBufferMemory, 0, indexBufferRequirements.size, 0,
-                          &indexBufferPointer));
-
-    memcpy(indexBufferPointer, indexData.data(), indexBufferRequirements.size);
-
-    VkMappedMemoryRange indexBufferMappedMemory{};
-    indexBufferMappedMemory.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    indexBufferMappedMemory.memory = indexBufferMemory;
-    indexBufferMappedMemory.size = VK_WHOLE_SIZE;
-    indexBufferMappedMemory.offset = 0;
-    vkFlushMappedMemoryRanges(vulkanHandles.device, 1, &indexBufferMappedMemory);
-    vkUnmapMemory(vulkanHandles.device, indexBufferMemory);
+    Buffer indexBuffer = vulkanAllocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
+                                                       sizeof(uint32_t) * indexData.size(),
+                                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                                                       (void *) indexData.data());
 
     float frameNumber = 0;
     while (!glfwWindowShouldClose(window)) {
@@ -545,8 +527,8 @@ int main() {
         vkCmdBeginRenderPass(graphicsBuffer, &vkRenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(graphicsBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanHandles.pipeline);
         VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(graphicsBuffer, 0, 1, &vkVertexBuffer, &offset);
-        vkCmdBindIndexBuffer(graphicsBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindVertexBuffers(graphicsBuffer, 0, 1, &vertexBuffer.buffer, &offset);
+        vkCmdBindIndexBuffer(graphicsBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(graphicsBuffer, indexData.size(), 1, 0, 0, 1);
         vkCmdEndRenderPass(graphicsBuffer);
         vkEndCommandBuffer(graphicsBuffer);

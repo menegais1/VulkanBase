@@ -52,4 +52,10 @@ struct VulkanHandles {
     VkPhysicalDevice physicalDevice;
 };
 
+struct Buffer {
+    VkBuffer buffer;
+    VkMemoryRequirements memoryRequirements;
+    VkDeviceMemory deviceMemory;
+};
+
 #endif
