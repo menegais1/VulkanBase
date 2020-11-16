@@ -387,26 +387,49 @@ VkFence vulkanCreateFence(VulkanHandles vulkanHandles, VkFenceCreateFlags flags)
     return vkFence;
 }
 
-Buffer
-vulkanAllocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, uint32_t size,
-                              VkBufferUsageFlags usageFlags, VkMemoryPropertyFlagBits memoryPropertyFlags, void *data) {
-    Buffer buffer{};
+VkBuffer vulkanAllocateExclusiveBuffer(VulkanHandles vulkanHandles, uint32_t size, VkBufferUsageFlags usageFlags) {
+    VkBuffer buffer;
     VkBufferCreateInfo vkVertexBufferCreateInfo{};
     vkVertexBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     vkVertexBufferCreateInfo.size = size;
     vkVertexBufferCreateInfo.usage = usageFlags;
     vkVertexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    VK_ASSERT(vkCreateBuffer(vulkanHandles.device, &vkVertexBufferCreateInfo, nullptr, &buffer.buffer));
+    VK_ASSERT(vkCreateBuffer(vulkanHandles.device, &vkVertexBufferCreateInfo, nullptr, &buffer));
+    return buffer;
+}
 
-    vkGetBufferMemoryRequirements(vulkanHandles.device, buffer.buffer, &buffer.memoryRequirements);
+VkMemoryRequirements vulkanGetMemoryRequirements(VulkanHandles vulkanHandles, VkBuffer vkBuffer) {
+    VkMemoryRequirements vkMemoryRequirements{};
+    vkGetBufferMemoryRequirements(vulkanHandles.device, vkBuffer, &vkMemoryRequirements);
+    return vkMemoryRequirements;
+}
+
+VkDeviceMemory
+vulkanAllocateDeviceMemory(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, VkBuffer vkBuffer,
+                           VkMemoryRequirements vkMemoryRequirements,
+                           VkMemoryPropertyFlagBits memoryPropertyFlags) {
+
     VkMemoryAllocateInfo vkMemoryAllocateInfo{};
     vkMemoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     vkMemoryAllocateInfo.memoryTypeIndex = vulkanGetMemoryTypeIndex(physicalDeviceInfo,
-                                                                    buffer.memoryRequirements.memoryTypeBits,
+                                                                    vkMemoryRequirements.memoryTypeBits,
                                                                     memoryPropertyFlags);
-    vkMemoryAllocateInfo.allocationSize = buffer.memoryRequirements.size;
+    VkDeviceMemory vkDeviceMemory{};
+    vkMemoryAllocateInfo.allocationSize = vkMemoryRequirements.size;
     VK_ASSERT(vkAllocateMemory(vulkanHandles.device, &vkMemoryAllocateInfo, nullptr,
-                               &buffer.deviceMemory));
+                               &vkDeviceMemory));
+    return vkDeviceMemory;
+
+}
+
+Buffer allocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, uint32_t size,
+                               VkBufferUsageFlags usageFlags, VkMemoryPropertyFlagBits memoryPropertyFlags,
+                               void *data) {
+    Buffer buffer{};
+    buffer.buffer = vulkanAllocateExclusiveBuffer(vulkanHandles, size, usageFlags);
+    buffer.memoryRequirements = vulkanGetMemoryRequirements(vulkanHandles, buffer.buffer);
+    buffer.deviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo, buffer.buffer,
+                                                     buffer.memoryRequirements, memoryPropertyFlags);
 
     VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, buffer.buffer, buffer.deviceMemory, 0));
 
@@ -488,17 +511,17 @@ int main() {
             0, 1, 2, 0, 2, 3
     };
 
-    Buffer vertexBuffer = vulkanAllocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
-                                                        sizeof(InputVertex) * vertexBufferData.size(),
-                                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-                                                        (void *) vertexBufferData.data());
+    Buffer vertexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
+                                                  sizeof(InputVertex) * vertexBufferData.size(),
+                                                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                                                  (void *) vertexBufferData.data());
 
-    Buffer indexBuffer = vulkanAllocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
-                                                       sizeof(uint32_t) * indexData.size(),
-                                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-                                                       (void *) indexData.data());
+    Buffer indexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
+                                                 sizeof(uint32_t) * indexData.size(),
+                                                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                                                 (void *) indexData.data());
 
     float frameNumber = 0;
     while (!glfwWindowShouldClose(window)) {
