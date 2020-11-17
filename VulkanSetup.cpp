@@ -10,8 +10,10 @@
 #include <cstring>
 #include <stdexcept>
 #include <set>
+#include <iostream>
 #include "VulkanSetup.h"
 #include "VulkanStructures.h"
+#include "VulkanDebug.h"
 
 
 std::vector<VkExtensionProperties> VulkanSetup::vulkanQueryInstanceExtensions() {
@@ -160,9 +162,14 @@ VulkanSetup::vulkanGetQueueFamilyInfo(const VkPhysicalDevice vkPhysicalDevice, c
     for (int i = 0; i < physicalDeviceInfo.queueFamilyProperties.size(); ++i) {
         if (physicalDeviceInfo.queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
             queueFamilyInfo.graphicsFamilyIndex = i;
+        if (physicalDeviceInfo.queueFamilyProperties[i].queueFlags & VK_QUEUE_TRANSFER_BIT)
+            queueFamilyInfo.transferFamilyIndex = i;
+
         VkBool32 hasPresentationCapability = VK_FALSE;
         vkGetPhysicalDeviceSurfaceSupportKHR(vkPhysicalDevice, i, vkSurfaceKhr, &hasPresentationCapability);
         if (hasPresentationCapability) queueFamilyInfo.presentationFamilyIndex = i;
+
+        printQueueFamilies(physicalDeviceInfo.queueFamilyProperties[i], hasPresentationCapability);
     }
     return queueFamilyInfo;
 }
@@ -225,7 +232,8 @@ VulkanSetup::vulkanCreateLogicalDevice(const VulkanHandles vulkanHandles, const 
     float priority = 1.00;
 
     std::set<int> queueFamilyIndex = {physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex,
-                                      physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex};
+                                      physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex,
+                                      physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex};
     VkDeviceQueueCreateInfo vkDeviceQueueCreateInfo[queueFamilyIndex.size()];
     int count = 0;
     for (auto index : queueFamilyIndex) {

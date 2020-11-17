@@ -15,6 +15,7 @@
 struct QueueFamilyInfo {
     int graphicsFamilyIndex = -1;
     int presentationFamilyIndex = -1;
+    int transferFamilyIndex = -1;
 };
 
 struct PhysicalDeviceInfo {
@@ -54,6 +55,7 @@ struct VulkanHandles {
 
 struct Buffer {
     VkBuffer buffer;
+    VkDeviceSize size;
     VkMemoryRequirements memoryRequirements;
     VkDeviceMemory deviceMemory;
 };

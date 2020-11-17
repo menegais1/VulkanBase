@@ -39,7 +39,6 @@ vulkanCreateCommandBuffers(const VulkanHandles vulkanHandles, const VkCommandPoo
     vkCommandBufferAllocateInfo.commandPool = vkCommandPool;
     vkCommandBufferAllocateInfo.commandBufferCount = commandBufferCount;
     vkCommandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    VkCommandBuffer vkCommandBuffer;
     VK_ASSERT(vkAllocateCommandBuffers(vulkanHandles.device, &vkCommandBufferAllocateInfo, commandBuffers.data()));
     return commandBuffers;
 }
@@ -422,22 +421,12 @@ vulkanAllocateDeviceMemory(VulkanHandles vulkanHandles, PhysicalDeviceInfo physi
 
 }
 
-Buffer allocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, uint32_t size,
-                               VkBufferUsageFlags usageFlags, VkMemoryPropertyFlagBits memoryPropertyFlags,
-                               void *data) {
-    Buffer buffer{};
-    buffer.buffer = vulkanAllocateExclusiveBuffer(vulkanHandles, size, usageFlags);
-    buffer.memoryRequirements = vulkanGetMemoryRequirements(vulkanHandles, buffer.buffer);
-    buffer.deviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo, buffer.buffer,
-                                                     buffer.memoryRequirements, memoryPropertyFlags);
-
-    VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, buffer.buffer, buffer.deviceMemory, 0));
-
+void vulkanMapMemoryWithFlush(VulkanHandles vulkanHandles, Buffer buffer, void *data) {
     void *memoryPointer;
-    VK_ASSERT(vkMapMemory(vulkanHandles.device, buffer.deviceMemory, 0, buffer.memoryRequirements.size, 0,
+    VK_ASSERT(vkMapMemory(vulkanHandles.device, buffer.deviceMemory, 0, buffer.size, 0,
                           &memoryPointer));
 
-    memcpy(memoryPointer, data, buffer.memoryRequirements.size);
+    memcpy(memoryPointer, data, buffer.size);
 
     VkMappedMemoryRange vkMappedMemoryRange{};
     vkMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
@@ -448,6 +437,19 @@ Buffer allocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo p
     vkFlushMappedMemoryRanges(vulkanHandles.device, 1, &vkMappedMemoryRange);
     memoryPointer = nullptr;
     vkUnmapMemory(vulkanHandles.device, buffer.deviceMemory);
+
+}
+
+Buffer allocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, uint32_t size,
+                               VkBufferUsageFlags usageFlags, VkMemoryPropertyFlagBits memoryPropertyFlags) {
+    Buffer buffer{};
+    buffer.size = size;
+    buffer.buffer = vulkanAllocateExclusiveBuffer(vulkanHandles, size, usageFlags);
+    buffer.memoryRequirements = vulkanGetMemoryRequirements(vulkanHandles, buffer.buffer);
+    buffer.deviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo, buffer.buffer,
+                                                     buffer.memoryRequirements, memoryPropertyFlags);
+
+    VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, buffer.buffer, buffer.deviceMemory, 0));
 
     return buffer;
 }
@@ -462,14 +464,15 @@ int main() {
     PhysicalDeviceInfo physicalDeviceInfo;
     PresentationEngineInfo presentationEngineInfo;
     RenderizationStructures renderizationStructures{};
-    VkCommandPool vkGraphicsPool, vkPresentationPool;
+    VkCommandPool vkGraphicsPool, vkTransferPool;
     VkSemaphore getImageSemaphore{}, presentImageSemaphore{};
-    VkQueue graphicsQueue, presentationQueue;
+    VkQueue graphicsQueue, presentationQueue, transferQueue;
 
     VulkanSetup vulkanSetup;
     vulkanSetup.vulkanSetup(window, vulkanHandles, physicalDeviceInfo, presentationEngineInfo);
 
     vkGraphicsPool = vulkanCreateCommandPool(vulkanHandles, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
+    vkTransferPool = vulkanCreateCommandPool(vulkanHandles, physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex);
     vulkanHandles.swapchain = vulkanCreateSwapchain(vulkanHandles, physicalDeviceInfo, presentationEngineInfo);
     renderizationStructures.images = vulkanGetSwapchainImages(vulkanHandles, presentationEngineInfo);
     renderizationStructures.imageViews = vulkanCreateSwapchainImageViews(vulkanHandles, presentationEngineInfo,
@@ -492,7 +495,10 @@ int main() {
                      &graphicsQueue);
     vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex, 0,
                      &presentationQueue);
+    vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex, 0,
+                     &transferQueue);
 
+    VkCommandBuffer transferCommandBuffer = vulkanCreateCommandBuffers(vulkanHandles, vkTransferPool, 1)[0];
 
     VkRect2D viewRect{};
     viewRect.extent = presentationEngineInfo.extents;
@@ -511,17 +517,60 @@ int main() {
             0, 1, 2, 0, 2, 3
     };
 
+    Buffer stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
+                                                   sizeof(InputVertex) * vertexBufferData.size(),
+                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+    vulkanMapMemoryWithFlush(vulkanHandles, stagingBuffer, vertexBufferData.data());
+
+
     Buffer vertexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
                                                   sizeof(InputVertex) * vertexBufferData.size(),
+                                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-                                                  (void *) vertexBufferData.data());
+                                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VkCommandBufferBeginInfo transferBegin{};
+    transferBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    transferBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VkBufferCopy vkBufferCopy{};
+    vkBufferCopy.size = vertexBuffer.size;
+    vkBufferCopy.srcOffset = 0;
+    vkBufferCopy.dstOffset = 0;
+    VK_ASSERT(vkBeginCommandBuffer(transferCommandBuffer, &transferBegin));
+    vkCmdCopyBuffer(transferCommandBuffer, stagingBuffer.buffer, vertexBuffer.buffer, 1, &vkBufferCopy);
+    VkBufferMemoryBarrier vkBufferMemoryBarrier{};
+    vkBufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    vkBufferMemoryBarrier.buffer = vertexBuffer.buffer;
+    vkBufferMemoryBarrier.size = VK_WHOLE_SIZE;
+    vkBufferMemoryBarrier.offset = 0;
+    vkBufferMemoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    vkBufferMemoryBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+    vkBufferMemoryBarrier.srcQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex;
+    vkBufferMemoryBarrier.dstQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex;
+    vkCmdPipelineBarrier(transferCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0,
+                         0, nullptr, 1, &vkBufferMemoryBarrier, 0, nullptr);
+
+    vkEndCommandBuffer(transferCommandBuffer);
+    VkSubmitInfo transferSubmitInfo{};
+    transferSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    transferSubmitInfo.commandBufferCount = 1;
+    transferSubmitInfo.pCommandBuffers = &transferCommandBuffer;
+    transferSubmitInfo.waitSemaphoreCount = 0;
+    transferSubmitInfo.signalSemaphoreCount = 0;
+
+    VK_ASSERT(vkQueueSubmit(transferQueue, 1, &transferSubmitInfo, VK_NULL_HANDLE));
+
+    vkDeviceWaitIdle(vulkanHandles.device);
 
     Buffer indexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
                                                  sizeof(uint32_t) * indexData.size(),
                                                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-                                                 (void *) indexData.data());
+                                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+    vulkanMapMemoryWithFlush(vulkanHandles, indexBuffer, indexData.data());
 
     float frameNumber = 0;
     while (!glfwWindowShouldClose(window)) {
