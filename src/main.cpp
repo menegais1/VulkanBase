@@ -10,6 +10,8 @@
 #include <cmath>
 #include "VulkanStructures.h"
 #include "VulkanSetup.h"
+#include "FileManagers/Bitmap/Bitmap.h"
+#include "FileManagers/FileLoader.h"
 #include <glm/vec3.hpp>
 
 int const WIDTH = 300;
@@ -18,6 +20,7 @@ int const HEIGHT = 300;
 struct InputVertex {
     glm::vec3 position;
     glm::vec3 color;
+    glm::vec2 texCoord;
 };
 
 VkCommandPool vulkanCreateCommandPool(const VulkanHandles vulkanHandles, const int queueFamilyIndex) {
@@ -225,18 +228,11 @@ vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngi
 }
 
 VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo,
+                                VkDescriptorSetLayout descriptorSetLayout, VkPipelineLayout vkPipelineLayout,
                                 const VkShaderModule vertexShaderModule,
                                 const VkShaderModule fragmentShaderModule) {
 
-    VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo{};
-    vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    vkPipelineLayoutCreateInfo.setLayoutCount = 0;
-    vkPipelineLayoutCreateInfo.pSetLayouts = nullptr;
-    vkPipelineLayoutCreateInfo.pushConstantRangeCount = 0;
-    vkPipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-    VkPipelineLayout vkPipelineLayout;
-    VK_ASSERT(vkCreatePipelineLayout(vulkanHandles.device, &vkPipelineLayoutCreateInfo, nullptr, &vkPipelineLayout));
 
     /////// Define Vertex Input
     VkVertexInputBindingDescription vkVertexInputBindingDescription{};
@@ -256,7 +252,14 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkVertexAttrColor.format = VK_FORMAT_R32G32B32_SFLOAT;
     vkVertexAttrColor.location = 1;
 
-    std::vector<VkVertexInputAttributeDescription> vkDescriptions{vkVertexAttrPosition, vkVertexAttrColor};
+    VkVertexInputAttributeDescription vkVertexAttrTexCoord{};
+    vkVertexAttrTexCoord.binding = 0;
+    vkVertexAttrTexCoord.offset = offsetof(struct InputVertex, texCoord);
+    vkVertexAttrTexCoord.format = VK_FORMAT_R32G32_SFLOAT;
+    vkVertexAttrTexCoord.location = 2;
+
+    std::vector<VkVertexInputAttributeDescription> vkDescriptions{vkVertexAttrPosition, vkVertexAttrColor,
+                                                                  vkVertexAttrTexCoord};
     VkPipelineVertexInputStateCreateInfo vkVertexInputStateCreateInfo{};
     vkVertexInputStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vkVertexInputStateCreateInfo.vertexAttributeDescriptionCount = vkDescriptions.size();
@@ -397,14 +400,20 @@ VkBuffer vulkanAllocateExclusiveBuffer(VulkanHandles vulkanHandles, uint32_t siz
     return buffer;
 }
 
-VkMemoryRequirements vulkanGetMemoryRequirements(VulkanHandles vulkanHandles, VkBuffer vkBuffer) {
+VkMemoryRequirements vulkanGetBufferMemoryRequirements(VulkanHandles vulkanHandles, VkBuffer vkBuffer) {
     VkMemoryRequirements vkMemoryRequirements{};
     vkGetBufferMemoryRequirements(vulkanHandles.device, vkBuffer, &vkMemoryRequirements);
     return vkMemoryRequirements;
 }
 
+VkMemoryRequirements vulkanGetImageMemoryRequirements(VulkanHandles vulkanHandles, VkImage vkImage) {
+    VkMemoryRequirements vkMemoryRequirements{};
+    vkGetImageMemoryRequirements(vulkanHandles.device, vkImage, &vkMemoryRequirements);
+    return vkMemoryRequirements;
+}
+
 VkDeviceMemory
-vulkanAllocateDeviceMemory(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, VkBuffer vkBuffer,
+vulkanAllocateDeviceMemory(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo,
                            VkMemoryRequirements vkMemoryRequirements,
                            VkMemoryPropertyFlagBits memoryPropertyFlags) {
 
@@ -445,9 +454,9 @@ Buffer allocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo p
     Buffer buffer{};
     buffer.size = size;
     buffer.buffer = vulkanAllocateExclusiveBuffer(vulkanHandles, size, usageFlags);
-    buffer.memoryRequirements = vulkanGetMemoryRequirements(vulkanHandles, buffer.buffer);
-    buffer.deviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo, buffer.buffer,
-                                                     buffer.memoryRequirements, memoryPropertyFlags);
+    buffer.memoryRequirements = vulkanGetBufferMemoryRequirements(vulkanHandles, buffer.buffer);
+    buffer.deviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo, buffer.memoryRequirements,
+                                                     memoryPropertyFlags);
 
     VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, buffer.buffer, buffer.deviceMemory, 0));
 
@@ -483,11 +492,38 @@ int main() {
     renderizationStructures.frameBuffers = vulkanCreateSwapchainFrameBuffers(vulkanHandles, presentationEngineInfo,
                                                                              renderizationStructures.imageViews);
 
-    auto vert = vulkanLoadShader("../Shaders/vert.spv");
-    auto frag = vulkanLoadShader("../Shaders/frag.spv");
+    auto vert = vulkanLoadShader("../src/Shaders/vert.spv");
+    auto frag = vulkanLoadShader("../src/Shaders/frag.spv");
     auto vertModule = vulkanCreateShaderModule(vulkanHandles, vert);
     auto fragModule = vulkanCreateShaderModule(vulkanHandles, frag);
-    vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo, vertModule, fragModule);
+
+    VkDescriptorSetLayoutBinding layoutBinding0{};
+    layoutBinding0.binding = 0;
+    layoutBinding0.descriptorCount = 1;
+    layoutBinding0.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    layoutBinding0.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
+    descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutInfo.bindingCount = 1;
+    descriptorSetLayoutInfo.pBindings = &layoutBinding0;
+    VkDescriptorSetLayout vkDescriptorSetLayout0;
+    VK_ASSERT(vkCreateDescriptorSetLayout(vulkanHandles.device, &descriptorSetLayoutInfo, nullptr,
+                                          &vkDescriptorSetLayout0));
+
+    VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo{};
+    vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    vkPipelineLayoutCreateInfo.setLayoutCount = 1;
+    vkPipelineLayoutCreateInfo.pSetLayouts = &vkDescriptorSetLayout0;
+    vkPipelineLayoutCreateInfo.pushConstantRangeCount = 0;
+    vkPipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
+
+    VkPipelineLayout vkPipelineLayout;
+    VK_ASSERT(vkCreatePipelineLayout(vulkanHandles.device, &vkPipelineLayoutCreateInfo, nullptr, &vkPipelineLayout));
+
+    vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo, vkDescriptorSetLayout0,
+                                                  vkPipelineLayout, vertModule, fragModule);
     getImageSemaphore = vulkanCreateSemaphore(vulkanHandles);
     presentImageSemaphore = vulkanCreateSemaphore(vulkanHandles);
 
@@ -507,10 +543,10 @@ int main() {
     VkFence vkFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
 
     std::vector<InputVertex> vertexBufferData{
-            {glm::vec3(0, 0, 0),     glm::vec3(1, 0, 0)},
-            {glm::vec3(0.5, 0, 0),   glm::vec3(1, 1, 0)},
-            {glm::vec3(0.5, 0.5, 0), glm::vec3(1, 0, 1)},
-            {glm::vec3(0, 0.5, 0),   glm::vec3(1, 0, 1)}
+            {glm::vec3(0, 0, 0),     glm::vec3(1, 0, 0), glm::vec2(0, 1)},
+            {glm::vec3(0.5, 0, 0),   glm::vec3(1, 1, 0), glm::vec2(1, 1)},
+            {glm::vec3(0.5, 0.5, 0), glm::vec3(1, 0, 1), glm::vec2(1, 0)},
+            {glm::vec3(0, 0.5, 0),   glm::vec3(1, 0, 1), glm::vec2(0, 0)}
     };
 
     std::vector<uint32_t> indexData = {
@@ -565,6 +601,150 @@ int main() {
 
     vkDeviceWaitIdle(vulkanHandles.device);
 
+    Bitmap *image = new Bitmap(FileLoader::getPath("Resources/dog.bmp"));
+
+    VkImageCreateInfo textureCreateInfo{};
+    textureCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    textureCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+    textureCreateInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    textureCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    textureCreateInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    textureCreateInfo.extent = {(uint32_t) image->width, (uint32_t) image->height, 1};
+    textureCreateInfo.arrayLayers = 1;
+    textureCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    textureCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    textureCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    textureCreateInfo.mipLevels = 1;
+    VkImage texture;
+    VK_ASSERT(vkCreateImage(vulkanHandles.device, &textureCreateInfo, nullptr, &texture));
+    VkMemoryRequirements imageMemoryRequirements = vulkanGetImageMemoryRequirements(vulkanHandles, texture);
+    VkDeviceMemory imageDeviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo,
+                                                                  imageMemoryRequirements,
+                                                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VK_ASSERT(vkBindImageMemory(vulkanHandles.device, texture, imageDeviceMemory, 0));
+
+    VkImageViewCreateInfo vkImageViewCreateInfo{};
+    vkImageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vkImageViewCreateInfo.image = texture;
+    vkImageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vkImageViewCreateInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    vkImageViewCreateInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkImageViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                        VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+
+    VkImageView textureImageView;
+    VK_ASSERT(vkCreateImageView(vulkanHandles.device, &vkImageViewCreateInfo, nullptr, &textureImageView));
+
+    VkSamplerCreateInfo textureSamplerInfo{};
+    textureSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    textureSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    textureSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    textureSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    textureSamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    textureSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    textureSamplerInfo.anisotropyEnable = VK_FALSE;
+    textureSamplerInfo.compareEnable = VK_FALSE;
+    textureSamplerInfo.minFilter = VK_FILTER_LINEAR;
+    textureSamplerInfo.magFilter = VK_FILTER_LINEAR;
+    textureSamplerInfo.unnormalizedCoordinates = VK_FALSE;
+
+    VkSampler textureSampler;
+    VK_ASSERT(vkCreateSampler(vulkanHandles.device, &textureSamplerInfo, nullptr, &textureSampler));
+    stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, image->width * image->height * 4 * 4,
+                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+    vulkanMapMemoryWithFlush(vulkanHandles, stagingBuffer, image->originalBitmapArray);
+
+    VkCommandBufferBeginInfo vkTextureTransferBegin{};
+    vkTextureTransferBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    vkTextureTransferBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_ASSERT(vkBeginCommandBuffer(transferCommandBuffer, &vkTextureTransferBegin));
+
+    VkImageMemoryBarrier vkImageMemoryBarrier{};
+    vkImageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    vkImageMemoryBarrier.image = texture;
+    vkImageMemoryBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkImageMemoryBarrier.srcAccessMask = 0;
+    vkImageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkImageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    vkImageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    vkImageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    vkImageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    vkCmdPipelineBarrier(transferCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                         nullptr, 0, nullptr,
+                         1, &vkImageMemoryBarrier);
+    VkImageSubresourceLayers vkImageSubresourceLayers = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    VkBufferImageCopy vkBufferImageCopy{};
+    vkBufferImageCopy.imageExtent = {(uint32_t) image->width, (uint32_t) image->height, 1};
+    vkBufferImageCopy.bufferImageHeight = 0;
+    vkBufferImageCopy.bufferRowLength = 0;
+    vkBufferImageCopy.bufferOffset = 0;
+    vkBufferImageCopy.imageOffset = {0, 0, 0};
+    vkBufferImageCopy.imageSubresource = vkImageSubresourceLayers;
+
+    vkCmdCopyBufferToImage(transferCommandBuffer, stagingBuffer.buffer, texture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &vkBufferImageCopy);
+    vkImageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    vkImageMemoryBarrier.image = texture;
+    vkImageMemoryBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkImageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkImageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkImageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    vkImageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkImageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    vkImageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    vkCmdPipelineBarrier(transferCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+                         nullptr, 0, nullptr,
+                         1, &vkImageMemoryBarrier);
+
+    VK_ASSERT(vkEndCommandBuffer(transferCommandBuffer));
+    VK_ASSERT(vkQueueSubmit(transferQueue, 1, &transferSubmitInfo, VK_NULL_HANDLE));
+
+    vkDeviceWaitIdle(vulkanHandles.device);
+
+
+    VkDescriptorPoolSize vkDescriptorPoolSize{};
+    vkDescriptorPoolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    vkDescriptorPoolSize.descriptorCount = 1;
+    VkDescriptorPoolCreateInfo vkDescriptorPoolCreateInfo{};
+    vkDescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    vkDescriptorPoolCreateInfo.poolSizeCount = 1;
+    vkDescriptorPoolCreateInfo.pPoolSizes = &vkDescriptorPoolSize;
+    vkDescriptorPoolCreateInfo.maxSets = 1;
+    VkDescriptorPool imageSamplerPool;
+    VK_ASSERT(vkCreateDescriptorPool(vulkanHandles.device, &vkDescriptorPoolCreateInfo, nullptr, &imageSamplerPool));
+
+    VkDescriptorSetAllocateInfo textureDescriptorAllocate{};
+    textureDescriptorAllocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    textureDescriptorAllocate.descriptorPool = imageSamplerPool;
+    textureDescriptorAllocate.descriptorSetCount = 1;
+    textureDescriptorAllocate.pSetLayouts = &vkDescriptorSetLayout0;
+    VkDescriptorSet textureDescriptorSet;
+    VK_ASSERT(vkAllocateDescriptorSets(vulkanHandles.device, &textureDescriptorAllocate, &textureDescriptorSet));
+
+    VkDescriptorImageInfo vkDescriptorImageInfo{};
+    vkDescriptorImageInfo.imageView = textureImageView;
+    vkDescriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkDescriptorImageInfo.sampler = textureSampler;
+
+    VkWriteDescriptorSet vkWriteDescriptorSet{};
+    vkWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    vkWriteDescriptorSet.descriptorCount = 1;
+    vkWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    vkWriteDescriptorSet.pImageInfo = &vkDescriptorImageInfo;
+    vkWriteDescriptorSet.dstSet = textureDescriptorSet;
+    vkWriteDescriptorSet.dstBinding = 0;
+    vkWriteDescriptorSet.dstArrayElement = 0;
+    vkWriteDescriptorSet.pBufferInfo = nullptr;
+    vkWriteDescriptorSet.pTexelBufferView = nullptr;
+
+    vkUpdateDescriptorSets(vulkanHandles.device, 1, &vkWriteDescriptorSet, 0, nullptr);
     Buffer indexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
                                                  sizeof(uint32_t) * indexData.size(),
                                                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
@@ -601,6 +781,9 @@ int main() {
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(graphicsBuffer, 0, 1, &vertexBuffer.buffer, &offset);
         vkCmdBindIndexBuffer(graphicsBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindDescriptorSets(graphicsBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 0, 1,
+                                &textureDescriptorSet, 0,
+                                nullptr);
         vkCmdDrawIndexed(graphicsBuffer, indexData.size(), 1, 0, 0, 1);
         vkCmdEndRenderPass(graphicsBuffer);
         vkEndCommandBuffer(graphicsBuffer);
