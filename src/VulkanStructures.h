@@ -36,11 +36,22 @@ struct PresentationEngineInfo {
     VkPresentModeKHR presentMode;
 };
 
-struct RenderizationStructures {
+struct RenderFrame {
+    VkCommandBuffer commandBuffer;
+    VkSemaphore imageReadySemaphore;
+    VkSemaphore presentationReadySemaphore;
+    VkFramebuffer frameBuffer;
+    VkFence bufferFinishedFence;
+};
+
+struct SwapchainReferences {
     std::vector<VkImage> images;
     std::vector<VkImageView> imageViews;
-    std::vector<VkFramebuffer> frameBuffers;
-    std::vector<VkCommandBuffer> commandBuffers;
+};
+
+struct TransferStructure {
+    VkCommandBuffer transferBuffer;
+    VkFence transferAvailableFence;
 };
 
 struct VulkanHandles {

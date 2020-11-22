@@ -12,6 +12,7 @@
 #include "VulkanSetup.h"
 #include "FileManagers/Bitmap/Bitmap.h"
 #include "FileManagers/FileLoader.h"
+#include "VulkanHelpers.h"
 #include <glm/vec3.hpp>
 
 int const WIDTH = 300;
@@ -23,161 +24,6 @@ struct InputVertex {
     glm::vec2 texCoord;
 };
 
-VkCommandPool vulkanCreateCommandPool(const VulkanHandles vulkanHandles, const int queueFamilyIndex) {
-    VkCommandPoolCreateInfo vkCommandPoolCreateInfo{};
-    vkCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    vkCommandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
-    vkCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    VkCommandPool vkCommandPool;
-    VK_ASSERT(vkCreateCommandPool(vulkanHandles.device, &vkCommandPoolCreateInfo, nullptr, &vkCommandPool));
-    return vkCommandPool;
-}
-
-std::vector<VkCommandBuffer>
-vulkanCreateCommandBuffers(const VulkanHandles vulkanHandles, const VkCommandPool vkCommandPool,
-                           const int commandBufferCount) {
-    std::vector<VkCommandBuffer> commandBuffers(commandBufferCount);
-    VkCommandBufferAllocateInfo vkCommandBufferAllocateInfo{};
-    vkCommandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    vkCommandBufferAllocateInfo.commandPool = vkCommandPool;
-    vkCommandBufferAllocateInfo.commandBufferCount = commandBufferCount;
-    vkCommandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    VK_ASSERT(vkAllocateCommandBuffers(vulkanHandles.device, &vkCommandBufferAllocateInfo, commandBuffers.data()));
-    return commandBuffers;
-}
-
-VkFramebuffer
-vulkanCreateFrameBuffer(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo,
-                        const VkImageView imageView) {
-    VkFramebufferCreateInfo vkFramebufferCreateInfo{};
-    vkFramebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    vkFramebufferCreateInfo.attachmentCount = 1;
-    vkFramebufferCreateInfo.pAttachments = &imageView;
-    vkFramebufferCreateInfo.renderPass = vulkanHandles.renderPass;
-    vkFramebufferCreateInfo.width = presentationEngineInfo.extents.width;
-    vkFramebufferCreateInfo.height = presentationEngineInfo.extents.height;
-    vkFramebufferCreateInfo.layers = 1;
-    VkFramebuffer vkFramebuffer;
-    VK_ASSERT(vkCreateFramebuffer(vulkanHandles.device, &vkFramebufferCreateInfo, nullptr, &vkFramebuffer));
-    return vkFramebuffer;
-}
-
-VkSwapchainKHR vulkanCreateSwapchain(VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo,
-                                     const PresentationEngineInfo presentationEngineInfo) {
-
-    VkSwapchainCreateInfoKHR vkSwapchainCreateInfoKhr{};
-    vkSwapchainCreateInfoKhr.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    vkSwapchainCreateInfoKhr.oldSwapchain = VK_NULL_HANDLE;
-    vkSwapchainCreateInfoKhr.surface = vulkanHandles.surface;
-    vkSwapchainCreateInfoKhr.presentMode = presentationEngineInfo.presentMode;
-    vkSwapchainCreateInfoKhr.imageFormat = presentationEngineInfo.format.format;
-    vkSwapchainCreateInfoKhr.imageColorSpace = presentationEngineInfo.format.colorSpace;
-    vkSwapchainCreateInfoKhr.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    vkSwapchainCreateInfoKhr.minImageCount = physicalDeviceInfo.surfaceCapabilities.minImageCount;
-    vkSwapchainCreateInfoKhr.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    vkSwapchainCreateInfoKhr.imageArrayLayers = 1;
-    vkSwapchainCreateInfoKhr.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    vkSwapchainCreateInfoKhr.clipped = VK_TRUE;
-    vkSwapchainCreateInfoKhr.imageExtent = presentationEngineInfo.extents;
-
-    unsigned int queueFamilyIndices[2] = {
-            (unsigned int) physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex,
-            (unsigned int) physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex};
-    if (physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex !=
-        physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex) {
-        vkSwapchainCreateInfoKhr.queueFamilyIndexCount = 2;
-        vkSwapchainCreateInfoKhr.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        vkSwapchainCreateInfoKhr.pQueueFamilyIndices = queueFamilyIndices;
-    } else {
-        vkSwapchainCreateInfoKhr.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        vkSwapchainCreateInfoKhr.queueFamilyIndexCount = 0;
-        vkSwapchainCreateInfoKhr.pQueueFamilyIndices = nullptr;
-    }
-    VkSwapchainKHR vkSwapchainKhr;
-    VK_ASSERT(vkCreateSwapchainKHR(vulkanHandles.device, &vkSwapchainCreateInfoKhr, nullptr, &vkSwapchainKhr));
-    return vkSwapchainKhr;
-
-}
-
-
-std::vector<VkImage>
-vulkanGetSwapchainImages(const VulkanHandles vulkanHandles, PresentationEngineInfo &presentationEngineInfo) {
-    unsigned int imageCount = 0;
-    vkGetSwapchainImagesKHR(vulkanHandles.device, vulkanHandles.swapchain, &imageCount, nullptr);
-    std::vector<VkImage> images(imageCount);
-    vkGetSwapchainImagesKHR(vulkanHandles.device, vulkanHandles.swapchain, &imageCount, images.data());
-    presentationEngineInfo.imageCount = imageCount;
-    return images;
-}
-
-std::vector<VkImageView> vulkanCreateSwapchainImageViews(const VulkanHandles vulkanHandles,
-                                                         const PresentationEngineInfo presentationEngineInfo,
-                                                         const std::vector<VkImage> images) {
-
-    std::vector<VkImageView> imageViews(presentationEngineInfo.imageCount);
-    for (int i = 0; i < presentationEngineInfo.imageCount; ++i) {
-        VkImageViewCreateInfo vkImageViewCreateInfo{};
-        vkImageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        vkImageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vkImageViewCreateInfo.image = images[i];
-        vkImageViewCreateInfo.format = presentationEngineInfo.format.format;
-        vkImageViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        vkImageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-        vkImageViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-        vkImageViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-        vkImageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-        vkImageViewCreateInfo.subresourceRange.layerCount = 1;
-        vkImageViewCreateInfo.subresourceRange.levelCount = 1;
-        vkImageViewCreateInfo.subresourceRange.baseMipLevel = 0;
-        vkImageViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        VK_ASSERT(vkCreateImageView(vulkanHandles.device, &vkImageViewCreateInfo, nullptr,
-                                    &imageViews[i]));
-    }
-    return imageViews;
-}
-
-std::vector<VkFramebuffer> vulkanCreateSwapchainFrameBuffers(const VulkanHandles vulkanHandles,
-                                                             const PresentationEngineInfo presentationEngineInfo,
-                                                             const std::vector<VkImageView> imageViews) {
-    std::vector<VkFramebuffer> frameBuffers(presentationEngineInfo.imageCount);
-    for (int i = 0; i < presentationEngineInfo.imageCount; ++i) {
-        frameBuffers[i] = vulkanCreateFrameBuffer(vulkanHandles, presentationEngineInfo, imageViews[i]);
-    }
-    return frameBuffers;
-}
-
-std::vector<VkCommandBuffer> vulkanCreateSwapchainCommandBuffers(const VulkanHandles vulkanHandles,
-                                                                 const PresentationEngineInfo presentationEngineInfo,
-                                                                 const VkCommandPool vkCommandPool) {
-    return vulkanCreateCommandBuffers(vulkanHandles, vkCommandPool, presentationEngineInfo.imageCount);
-}
-
-std::vector<char> vulkanLoadShader(const std::string filename) {
-    std::ifstream file(filename, std::ios::binary | std::ios::in | std::ios::ate);
-    if (!file.is_open()) {
-        std::cerr << "CANNOT OPEN SHADER FILE" << std::endl;
-        exit(-1);
-    }
-    size_t fileSize = (size_t) file.tellg();
-    std::vector<char> buffer(fileSize);
-
-    file.seekg(0);
-    file.read(buffer.data(), fileSize);
-    file.close();
-    return buffer;
-}
-
-VkShaderModule vulkanCreateShaderModule(const VulkanHandles vulkanHandles, const std::vector<char> shaderBytes) {
-    VkShaderModuleCreateInfo vkShaderModuleCreateInfo{};
-    vkShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    vkShaderModuleCreateInfo.pNext = nullptr;
-    vkShaderModuleCreateInfo.codeSize = shaderBytes.size();
-    vkShaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t *>(shaderBytes.data());
-
-    VkShaderModule shaderModule;
-    VK_ASSERT(vkCreateShaderModule(vulkanHandles.device, &vkShaderModuleCreateInfo, nullptr, &shaderModule));
-    return shaderModule;
-}
 
 VkRenderPass
 vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo) {
@@ -360,108 +206,6 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     return vkPipeline;
 }
 
-VkSemaphore vulkanCreateSemaphore(VulkanHandles vulkanHandles) {
-    VkSemaphoreCreateInfo vkSemaphoreCreateInfo{};
-    vkSemaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    VkSemaphore vkSemaphore;
-    VK_ASSERT(vkCreateSemaphore(vulkanHandles.device, &vkSemaphoreCreateInfo, nullptr, &vkSemaphore));
-    return vkSemaphore;
-}
-
-int vulkanGetMemoryTypeIndex(PhysicalDeviceInfo physicalDeviceInfo, uint32_t memoryTypeBits,
-                             VkMemoryPropertyFlagBits flagBits) {
-    for (int i = 0; i < physicalDeviceInfo.memoryProperties.memoryTypeCount; ++i) {
-        VkMemoryType memoryType = physicalDeviceInfo.memoryProperties.memoryTypes[i];
-        if ((memoryTypeBits & (1 << i)) && (memoryType.propertyFlags & flagBits) == flagBits) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-VkFence vulkanCreateFence(VulkanHandles vulkanHandles, VkFenceCreateFlags flags) {
-    VkFence vkFence{};
-    VkFenceCreateInfo fenceCreateInfo = {};
-    fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceCreateInfo.pNext = nullptr;
-    fenceCreateInfo.flags = flags;
-    VK_ASSERT(vkCreateFence(vulkanHandles.device, &fenceCreateInfo, nullptr, &vkFence));
-    return vkFence;
-}
-
-VkBuffer vulkanAllocateExclusiveBuffer(VulkanHandles vulkanHandles, uint32_t size, VkBufferUsageFlags usageFlags) {
-    VkBuffer buffer;
-    VkBufferCreateInfo vkVertexBufferCreateInfo{};
-    vkVertexBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vkVertexBufferCreateInfo.size = size;
-    vkVertexBufferCreateInfo.usage = usageFlags;
-    vkVertexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    VK_ASSERT(vkCreateBuffer(vulkanHandles.device, &vkVertexBufferCreateInfo, nullptr, &buffer));
-    return buffer;
-}
-
-VkMemoryRequirements vulkanGetBufferMemoryRequirements(VulkanHandles vulkanHandles, VkBuffer vkBuffer) {
-    VkMemoryRequirements vkMemoryRequirements{};
-    vkGetBufferMemoryRequirements(vulkanHandles.device, vkBuffer, &vkMemoryRequirements);
-    return vkMemoryRequirements;
-}
-
-VkMemoryRequirements vulkanGetImageMemoryRequirements(VulkanHandles vulkanHandles, VkImage vkImage) {
-    VkMemoryRequirements vkMemoryRequirements{};
-    vkGetImageMemoryRequirements(vulkanHandles.device, vkImage, &vkMemoryRequirements);
-    return vkMemoryRequirements;
-}
-
-VkDeviceMemory
-vulkanAllocateDeviceMemory(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo,
-                           VkMemoryRequirements vkMemoryRequirements,
-                           VkMemoryPropertyFlagBits memoryPropertyFlags) {
-
-    VkMemoryAllocateInfo vkMemoryAllocateInfo{};
-    vkMemoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    vkMemoryAllocateInfo.memoryTypeIndex = vulkanGetMemoryTypeIndex(physicalDeviceInfo,
-                                                                    vkMemoryRequirements.memoryTypeBits,
-                                                                    memoryPropertyFlags);
-    VkDeviceMemory vkDeviceMemory{};
-    vkMemoryAllocateInfo.allocationSize = vkMemoryRequirements.size;
-    VK_ASSERT(vkAllocateMemory(vulkanHandles.device, &vkMemoryAllocateInfo, nullptr,
-                               &vkDeviceMemory));
-    return vkDeviceMemory;
-
-}
-
-void vulkanMapMemoryWithFlush(VulkanHandles vulkanHandles, Buffer buffer, void *data) {
-    void *memoryPointer;
-    VK_ASSERT(vkMapMemory(vulkanHandles.device, buffer.deviceMemory, 0, buffer.size, 0,
-                          &memoryPointer));
-
-    memcpy(memoryPointer, data, buffer.size);
-
-    VkMappedMemoryRange vkMappedMemoryRange{};
-    vkMappedMemoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    vkMappedMemoryRange.memory = buffer.deviceMemory;
-    vkMappedMemoryRange.size = VK_WHOLE_SIZE;
-    vkMappedMemoryRange.offset = 0;
-
-    vkFlushMappedMemoryRanges(vulkanHandles.device, 1, &vkMappedMemoryRange);
-    memoryPointer = nullptr;
-    vkUnmapMemory(vulkanHandles.device, buffer.deviceMemory);
-
-}
-
-Buffer allocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, uint32_t size,
-                               VkBufferUsageFlags usageFlags, VkMemoryPropertyFlagBits memoryPropertyFlags) {
-    Buffer buffer{};
-    buffer.size = size;
-    buffer.buffer = vulkanAllocateExclusiveBuffer(vulkanHandles, size, usageFlags);
-    buffer.memoryRequirements = vulkanGetBufferMemoryRequirements(vulkanHandles, buffer.buffer);
-    buffer.deviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo, buffer.memoryRequirements,
-                                                     memoryPropertyFlags);
-
-    VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, buffer.buffer, buffer.deviceMemory, 0));
-
-    return buffer;
-}
 
 int main() {
     glfwInit();
@@ -472,7 +216,7 @@ int main() {
     VulkanHandles vulkanHandles{};
     PhysicalDeviceInfo physicalDeviceInfo;
     PresentationEngineInfo presentationEngineInfo;
-    RenderizationStructures renderizationStructures{};
+    SwapchainReferences swapchainReferences{};
     VkCommandPool vkGraphicsPool, vkTransferPool;
     VkSemaphore getImageSemaphore{}, presentImageSemaphore{};
     VkQueue graphicsQueue, presentationQueue, transferQueue;
@@ -482,16 +226,10 @@ int main() {
 
     vkGraphicsPool = vulkanCreateCommandPool(vulkanHandles, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
     vkTransferPool = vulkanCreateCommandPool(vulkanHandles, physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex);
-    vulkanHandles.swapchain = vulkanCreateSwapchain(vulkanHandles, physicalDeviceInfo, presentationEngineInfo);
-    renderizationStructures.images = vulkanGetSwapchainImages(vulkanHandles, presentationEngineInfo);
-    renderizationStructures.imageViews = vulkanCreateSwapchainImageViews(vulkanHandles, presentationEngineInfo,
-                                                                         renderizationStructures.images);
-    renderizationStructures.commandBuffers = vulkanCreateSwapchainCommandBuffers(vulkanHandles, presentationEngineInfo,
-                                                                                 vkGraphicsPool);
+    swapchainReferences.images = vulkanGetSwapchainImages(vulkanHandles, presentationEngineInfo);
+    swapchainReferences.imageViews = vulkanCreateSwapchainImageViews(vulkanHandles, presentationEngineInfo,
+                                                                     swapchainReferences.images);
     vulkanHandles.renderPass = vulkanCreateRenderPass(vulkanHandles, presentationEngineInfo);
-    renderizationStructures.frameBuffers = vulkanCreateSwapchainFrameBuffers(vulkanHandles, presentationEngineInfo,
-                                                                             renderizationStructures.imageViews);
-
     auto vert = vulkanLoadShader("../src/Shaders/vert.spv");
     auto frag = vulkanLoadShader("../src/Shaders/frag.spv");
     auto vertModule = vulkanCreateShaderModule(vulkanHandles, vert);
@@ -534,7 +272,9 @@ int main() {
     vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex, 0,
                      &transferQueue);
 
-    VkCommandBuffer transferCommandBuffer = vulkanCreateCommandBuffers(vulkanHandles, vkTransferPool, 1)[0];
+    TransferStructure transferStructure{};
+    transferStructure.transferBuffer = vulkanCreateCommandBuffers(vulkanHandles, vkTransferPool, 1)[0];
+    transferStructure.transferAvailableFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
 
     VkRect2D viewRect{};
     viewRect.extent = presentationEngineInfo.extents;
@@ -575,8 +315,10 @@ int main() {
     vkBufferCopy.size = vertexBuffer.size;
     vkBufferCopy.srcOffset = 0;
     vkBufferCopy.dstOffset = 0;
-    VK_ASSERT(vkBeginCommandBuffer(transferCommandBuffer, &transferBegin));
-    vkCmdCopyBuffer(transferCommandBuffer, stagingBuffer.buffer, vertexBuffer.buffer, 1, &vkBufferCopy);
+    VK_ASSERT(vkWaitForFences(vulkanHandles.device, 1, &transferStructure.transferAvailableFence, VK_TRUE, UINT64_MAX));
+    VK_ASSERT(vkResetFences(vulkanHandles.device, 1, &transferStructure.transferAvailableFence));
+    VK_ASSERT(vkBeginCommandBuffer(transferStructure.transferBuffer, &transferBegin));
+    vkCmdCopyBuffer(transferStructure.transferBuffer, stagingBuffer.buffer, vertexBuffer.buffer, 1, &vkBufferCopy);
     VkBufferMemoryBarrier vkBufferMemoryBarrier{};
     vkBufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     vkBufferMemoryBarrier.buffer = vertexBuffer.buffer;
@@ -586,20 +328,19 @@ int main() {
     vkBufferMemoryBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
     vkBufferMemoryBarrier.srcQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex;
     vkBufferMemoryBarrier.dstQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex;
-    vkCmdPipelineBarrier(transferCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0,
+    vkCmdPipelineBarrier(transferStructure.transferBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0,
                          0, nullptr, 1, &vkBufferMemoryBarrier, 0, nullptr);
 
-    vkEndCommandBuffer(transferCommandBuffer);
+    vkEndCommandBuffer(transferStructure.transferBuffer);
     VkSubmitInfo transferSubmitInfo{};
     transferSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     transferSubmitInfo.commandBufferCount = 1;
-    transferSubmitInfo.pCommandBuffers = &transferCommandBuffer;
+    transferSubmitInfo.pCommandBuffers = &transferStructure.transferBuffer;
     transferSubmitInfo.waitSemaphoreCount = 0;
     transferSubmitInfo.signalSemaphoreCount = 0;
 
-    VK_ASSERT(vkQueueSubmit(transferQueue, 1, &transferSubmitInfo, VK_NULL_HANDLE));
-
-    vkDeviceWaitIdle(vulkanHandles.device);
+    VK_ASSERT(vkQueueSubmit(transferQueue, 1, &transferSubmitInfo, transferStructure.transferAvailableFence));
 
     Bitmap *image = new Bitmap(FileLoader::getPath("Resources/dog.bmp"));
 
@@ -660,7 +401,9 @@ int main() {
     vkTextureTransferBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkTextureTransferBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    VK_ASSERT(vkBeginCommandBuffer(transferCommandBuffer, &vkTextureTransferBegin));
+    VK_ASSERT(vkWaitForFences(vulkanHandles.device, 1, &transferStructure.transferAvailableFence, VK_TRUE, UINT64_MAX));
+    VK_ASSERT(vkResetFences(vulkanHandles.device, 1, &transferStructure.transferAvailableFence));
+    VK_ASSERT(vkBeginCommandBuffer(transferStructure.transferBuffer, &vkTextureTransferBegin));
 
     VkImageMemoryBarrier vkImageMemoryBarrier{};
     vkImageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -673,7 +416,7 @@ int main() {
     vkImageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     vkImageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
-    vkCmdPipelineBarrier(transferCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    vkCmdPipelineBarrier(transferStructure.transferBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
                          nullptr, 0, nullptr,
                          1, &vkImageMemoryBarrier);
@@ -686,7 +429,8 @@ int main() {
     vkBufferImageCopy.imageOffset = {0, 0, 0};
     vkBufferImageCopy.imageSubresource = vkImageSubresourceLayers;
 
-    vkCmdCopyBufferToImage(transferCommandBuffer, stagingBuffer.buffer, texture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    vkCmdCopyBufferToImage(transferStructure.transferBuffer, stagingBuffer.buffer, texture,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                            1, &vkBufferImageCopy);
     vkImageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     vkImageMemoryBarrier.image = texture;
@@ -698,15 +442,13 @@ int main() {
     vkImageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     vkImageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
-    vkCmdPipelineBarrier(transferCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+    vkCmdPipelineBarrier(transferStructure.transferBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
                          nullptr, 0, nullptr,
                          1, &vkImageMemoryBarrier);
 
-    VK_ASSERT(vkEndCommandBuffer(transferCommandBuffer));
-    VK_ASSERT(vkQueueSubmit(transferQueue, 1, &transferSubmitInfo, VK_NULL_HANDLE));
-
-    vkDeviceWaitIdle(vulkanHandles.device);
+    VK_ASSERT(vkEndCommandBuffer(transferStructure.transferBuffer));
+    VK_ASSERT(vkQueueSubmit(transferQueue, 1, &transferSubmitInfo, transferStructure.transferAvailableFence));
 
 
     VkDescriptorPoolSize vkDescriptorPoolSize{};
@@ -752,65 +494,84 @@ int main() {
 
     vulkanMapMemoryWithFlush(vulkanHandles, indexBuffer, indexData.data());
 
+    int renderFramesAmount = 2;
+    std::vector<RenderFrame> renderFrames(renderFramesAmount);
+    for (int i = 0; i < renderFramesAmount; ++i) {
+        renderFrames[i] = createRenderFrame(vulkanHandles, vkGraphicsPool);
+    }
     float frameNumber = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         float flash = std::abs(std::sin(frameNumber / 500.f));
         vkClearValue.color = {{0.0f, 0.0f, flash, 1.0f}};
-        VK_ASSERT(vkWaitForFences(vulkanHandles.device, 1, &vkFence, true, UINT64_MAX));
-        VK_ASSERT(vkResetFences(vulkanHandles.device, 1, &vkFence));
 
-        unsigned int imageIndex = 0;
-        vkAcquireNextImageKHR(vulkanHandles.device, vulkanHandles.swapchain, UINT64_MAX, getImageSemaphore,
-                              VK_NULL_HANDLE,
-                              &imageIndex);
-        VkRenderPassBeginInfo vkRenderPassBeginInfo{};
-        vkRenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        vkRenderPassBeginInfo.renderPass = vulkanHandles.renderPass;
-        vkRenderPassBeginInfo.framebuffer = renderizationStructures.frameBuffers[imageIndex];
-        vkRenderPassBeginInfo.renderArea = viewRect;
-        vkRenderPassBeginInfo.clearValueCount = 1;
-        vkRenderPassBeginInfo.pClearValues = &vkClearValue;
+        for (int i = 0; i < renderFramesAmount; ++i) {
+            RenderFrame &renderFrame = renderFrames[i];
+            VK_ASSERT(vkWaitForFences(vulkanHandles.device, 1, &renderFrame.bufferFinishedFence, true, UINT64_MAX));
+            VK_ASSERT(vkResetFences(vulkanHandles.device, 1, &renderFrame.bufferFinishedFence));
+            unsigned int imageIndex = 0;
+            vkAcquireNextImageKHR(vulkanHandles.device, vulkanHandles.swapchain, UINT64_MAX,
+                                  renderFrame.imageReadySemaphore,
+                                  VK_NULL_HANDLE,
+                                  &imageIndex);
 
-        VkCommandBufferBeginInfo vkCommandBufferBeginInfo{};
-        vkCommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        VkCommandBuffer graphicsBuffer = renderizationStructures.commandBuffers[imageIndex];
-        vkBeginCommandBuffer(graphicsBuffer, &vkCommandBufferBeginInfo);
-        vkCmdBeginRenderPass(graphicsBuffer, &vkRenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdBindPipeline(graphicsBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanHandles.pipeline);
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(graphicsBuffer, 0, 1, &vertexBuffer.buffer, &offset);
-        vkCmdBindIndexBuffer(graphicsBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdBindDescriptorSets(graphicsBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 0, 1,
-                                &textureDescriptorSet, 0,
-                                nullptr);
-        vkCmdDrawIndexed(graphicsBuffer, indexData.size(), 1, 0, 0, 1);
-        vkCmdEndRenderPass(graphicsBuffer);
-        vkEndCommandBuffer(graphicsBuffer);
+            if (renderFrame.frameBuffer != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(vulkanHandles.device, renderFrame.frameBuffer, nullptr);
+            }
+            renderFrame.frameBuffer = vulkanCreateFrameBuffer(vulkanHandles,
+                                                              presentationEngineInfo.extents.width,
+                                                              presentationEngineInfo.extents.height,
+                                                              swapchainReferences.imageViews[imageIndex]);
 
-        VkSubmitInfo vkSubmitInfo{};
-        vkSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        vkSubmitInfo.commandBufferCount = 1;
-        vkSubmitInfo.pCommandBuffers = &graphicsBuffer;
-        vkSubmitInfo.waitSemaphoreCount = 1;
-        vkSubmitInfo.pWaitSemaphores = &getImageSemaphore;
-        vkSubmitInfo.signalSemaphoreCount = 1;
-        vkSubmitInfo.pSignalSemaphores = &presentImageSemaphore;
-        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        vkSubmitInfo.pWaitDstStageMask = &waitStage;
-        VK_ASSERT(vkQueueSubmit(graphicsQueue, 1, &vkSubmitInfo, vkFence));
+            VkRenderPassBeginInfo vkRenderPassBeginInfo{};
+            vkRenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            vkRenderPassBeginInfo.renderPass = vulkanHandles.renderPass;
+            vkRenderPassBeginInfo.framebuffer = renderFrame.frameBuffer;
+            vkRenderPassBeginInfo.renderArea = viewRect;
+            vkRenderPassBeginInfo.clearValueCount = 1;
+            vkRenderPassBeginInfo.pClearValues = &vkClearValue;
+
+            VkCommandBufferBeginInfo vkCommandBufferBeginInfo{};
+            vkCommandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+            vkBeginCommandBuffer(renderFrame.commandBuffer, &vkCommandBufferBeginInfo);
+            vkCmdBeginRenderPass(renderFrame.commandBuffer, &vkRenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBindPipeline(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanHandles.pipeline);
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(renderFrame.commandBuffer, 0, 1, &vertexBuffer.buffer, &offset);
+            vkCmdBindIndexBuffer(renderFrame.commandBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 0, 1,
+                                    &textureDescriptorSet, 0,
+                                    nullptr);
+            vkCmdDrawIndexed(renderFrame.commandBuffer, indexData.size(), 1, 0, 0, 1);
+            vkCmdEndRenderPass(renderFrame.commandBuffer);
+            vkEndCommandBuffer(renderFrame.commandBuffer);
+
+            VkSubmitInfo vkSubmitInfo{};
+            vkSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            vkSubmitInfo.commandBufferCount = 1;
+            vkSubmitInfo.pCommandBuffers = &renderFrame.commandBuffer;
+            vkSubmitInfo.waitSemaphoreCount = 1;
+            vkSubmitInfo.pWaitSemaphores = &renderFrame.imageReadySemaphore;
+            vkSubmitInfo.signalSemaphoreCount = 1;
+            vkSubmitInfo.pSignalSemaphores = &renderFrame.presentationReadySemaphore;
+            VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            vkSubmitInfo.pWaitDstStageMask = &waitStage;
+            VK_ASSERT(vkQueueSubmit(graphicsQueue, 1, &vkSubmitInfo, renderFrame.bufferFinishedFence));
 
 
-        VkPresentInfoKHR vkPresentInfoKhr{};
-        vkPresentInfoKhr.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        vkPresentInfoKhr.waitSemaphoreCount = 1;
-        vkPresentInfoKhr.pWaitSemaphores = &presentImageSemaphore;
-        vkPresentInfoKhr.swapchainCount = 1;
-        vkPresentInfoKhr.pSwapchains = &vulkanHandles.swapchain;
-        vkPresentInfoKhr.pImageIndices = &imageIndex;
+            VkPresentInfoKHR vkPresentInfoKhr{};
+            vkPresentInfoKhr.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+            vkPresentInfoKhr.waitSemaphoreCount = 1;
+            vkPresentInfoKhr.pWaitSemaphores = &renderFrame.presentationReadySemaphore;
+            vkPresentInfoKhr.swapchainCount = 1;
+            vkPresentInfoKhr.pSwapchains = &vulkanHandles.swapchain;
+            vkPresentInfoKhr.pImageIndices = &imageIndex;
 
-        VK_ASSERT(vkQueuePresentKHR(presentationQueue, &vkPresentInfoKhr));
-        frameNumber++;
+            VK_ASSERT(vkQueuePresentKHR(presentationQueue, &vkPresentInfoKhr));
+
+            frameNumber++;
+        }
     }
 
     vkDestroySwapchainKHR(vulkanHandles.device, vulkanHandles.swapchain, nullptr);

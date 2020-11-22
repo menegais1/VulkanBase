@@ -64,6 +64,9 @@ private:
 
     VkPresentModeKHR
     vulkanGetSwapchainPresentMode(const VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo);
+
+    VkSwapchainKHR vulkanCreateSwapchain(VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo,
+                                         const PresentationEngineInfo presentationEngineInfo);
 };
 
 

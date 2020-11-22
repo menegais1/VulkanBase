@@ -308,5 +308,44 @@ VulkanSetup::vulkanSetup(GLFWwindow *glfWwindow, VulkanHandles &vulkanHandles, P
     vulkanHandles.physicalDevice = vulkanQueryPhysicalDevice(vulkanHandles, physicalDeviceInfo);
     vulkanHandles.device = vulkanCreateLogicalDevice(vulkanHandles, physicalDeviceInfo);
     presentationEngineInfo = vulkanGetPresentationEngineInfo(vulkanHandles, physicalDeviceInfo);
+    vulkanHandles.swapchain = vulkanCreateSwapchain(vulkanHandles, physicalDeviceInfo, presentationEngineInfo);
+
+}
+
+
+VkSwapchainKHR VulkanSetup::vulkanCreateSwapchain(VulkanHandles vulkanHandles, const PhysicalDeviceInfo physicalDeviceInfo,
+                                     const PresentationEngineInfo presentationEngineInfo) {
+
+    VkSwapchainCreateInfoKHR vkSwapchainCreateInfoKhr{};
+    vkSwapchainCreateInfoKhr.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    vkSwapchainCreateInfoKhr.oldSwapchain = VK_NULL_HANDLE;
+    vkSwapchainCreateInfoKhr.surface = vulkanHandles.surface;
+    vkSwapchainCreateInfoKhr.presentMode = presentationEngineInfo.presentMode;
+    vkSwapchainCreateInfoKhr.imageFormat = presentationEngineInfo.format.format;
+    vkSwapchainCreateInfoKhr.imageColorSpace = presentationEngineInfo.format.colorSpace;
+    vkSwapchainCreateInfoKhr.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    vkSwapchainCreateInfoKhr.minImageCount = physicalDeviceInfo.surfaceCapabilities.minImageCount;
+    vkSwapchainCreateInfoKhr.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    vkSwapchainCreateInfoKhr.imageArrayLayers = 1;
+    vkSwapchainCreateInfoKhr.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    vkSwapchainCreateInfoKhr.clipped = VK_TRUE;
+    vkSwapchainCreateInfoKhr.imageExtent = presentationEngineInfo.extents;
+
+    unsigned int queueFamilyIndices[2] = {
+            (unsigned int) physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex,
+            (unsigned int) physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex};
+    if (physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex !=
+        physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex) {
+        vkSwapchainCreateInfoKhr.queueFamilyIndexCount = 2;
+        vkSwapchainCreateInfoKhr.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        vkSwapchainCreateInfoKhr.pQueueFamilyIndices = queueFamilyIndices;
+    } else {
+        vkSwapchainCreateInfoKhr.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        vkSwapchainCreateInfoKhr.queueFamilyIndexCount = 0;
+        vkSwapchainCreateInfoKhr.pQueueFamilyIndices = nullptr;
+    }
+    VkSwapchainKHR vkSwapchainKhr;
+    VK_ASSERT(vkCreateSwapchainKHR(vulkanHandles.device, &vkSwapchainCreateInfoKhr, nullptr, &vkSwapchainKhr));
+    return vkSwapchainKhr;
 
 }
