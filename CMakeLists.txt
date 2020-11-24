@@ -13,5 +13,5 @@ add_executable(VulkanBase src/main.cpp
         src/FileManagers/FileLoader.cpp
         src/FileManagers/Bitmap/Bitmap.h
         src/FileManagers/Bitmap/Bitmap.cpp
-        src/VulkanHelpers.h)
+        src/VulkanHelpers.h src/CommandBufferUtils.cpp src/CommandBufferUtils.h)
 target_link_libraries(VulkanBase glfw ${GLFW_LIBRARIES} Vulkan::Vulkan)

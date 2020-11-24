@@ -14,6 +14,7 @@
 #include <iostream>
 #include <cstring>
 #include "VulkanStructures.h"
+#include "CommandBufferUtils.h"
 
 VkMemoryRequirements vulkanGetBufferMemoryRequirements(VulkanHandles vulkanHandles, VkBuffer vkBuffer) {
     VkMemoryRequirements vkMemoryRequirements{};
@@ -76,28 +77,6 @@ VkShaderModule vulkanCreateShaderModule(const VulkanHandles vulkanHandles, const
 }
 
 
-VkCommandPool vulkanCreateCommandPool(const VulkanHandles vulkanHandles, const int queueFamilyIndex) {
-    VkCommandPoolCreateInfo vkCommandPoolCreateInfo{};
-    vkCommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    vkCommandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
-    vkCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    VkCommandPool vkCommandPool;
-    VK_ASSERT(vkCreateCommandPool(vulkanHandles.device, &vkCommandPoolCreateInfo, nullptr, &vkCommandPool));
-    return vkCommandPool;
-}
-
-std::vector<VkCommandBuffer>
-vulkanCreateCommandBuffers(const VulkanHandles vulkanHandles, const VkCommandPool vkCommandPool,
-                           const int commandBufferCount) {
-    std::vector<VkCommandBuffer> commandBuffers(commandBufferCount);
-    VkCommandBufferAllocateInfo vkCommandBufferAllocateInfo{};
-    vkCommandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    vkCommandBufferAllocateInfo.commandPool = vkCommandPool;
-    vkCommandBufferAllocateInfo.commandBufferCount = commandBufferCount;
-    vkCommandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    VK_ASSERT(vkAllocateCommandBuffers(vulkanHandles.device, &vkCommandBufferAllocateInfo, commandBuffers.data()));
-    return commandBuffers;
-}
 
 VkFramebuffer vulkanCreateFrameBuffer(const VulkanHandles vulkanHandles, uint32_t width, uint32_t height,
                                       const VkImageView imageView) {
@@ -126,7 +105,7 @@ VkFence vulkanCreateFence(VulkanHandles vulkanHandles, VkFenceCreateFlags flags)
 
 RenderFrame createRenderFrame(VulkanHandles vulkanHandles, VkCommandPool vkCommandPool) {
     RenderFrame renderFrame{};
-    renderFrame.commandBuffer = vulkanCreateCommandBuffers(vulkanHandles, vkCommandPool, 1)[0];
+    renderFrame.commandBuffer = CommandBufferUtils::vulkanCreateCommandBuffers(vulkanHandles, vkCommandPool, 1)[0];
     renderFrame.imageReadySemaphore = vulkanCreateSemaphore(vulkanHandles);
     renderFrame.presentationReadySemaphore = vulkanCreateSemaphore(vulkanHandles);
     renderFrame.bufferFinishedFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
