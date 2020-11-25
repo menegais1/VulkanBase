@@ -278,6 +278,7 @@ int main() {
     transferStructure.transferBuffer = CommandBufferUtils::vulkanCreateCommandBuffers(vulkanHandles, vkTransferPool,
                                                                                       1)[0];
     transferStructure.transferAvailableFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
+    transferStructure.transferQueue = transferQueue;
 
     VkRect2D viewRect{};
     viewRect.extent = presentationEngineInfo.extents;
@@ -310,31 +311,9 @@ int main() {
                                                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, transferStructure.transferBuffer,
-                                                 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-                                                 {transferStructure.transferAvailableFence});
-    {
-        VkBufferCopy vkBufferCopy{};
-        vkBufferCopy.size = vertexBuffer.size;
-        vkBufferCopy.srcOffset = 0;
-        vkBufferCopy.dstOffset = 0;
-        vkCmdCopyBuffer(transferStructure.transferBuffer, stagingBuffer.buffer, vertexBuffer.buffer, 1, &vkBufferCopy);
-        VkBufferMemoryBarrier vkBufferMemoryBarrier{};
-        vkBufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        vkBufferMemoryBarrier.buffer = vertexBuffer.buffer;
-        vkBufferMemoryBarrier.size = VK_WHOLE_SIZE;
-        vkBufferMemoryBarrier.offset = 0;
-        vkBufferMemoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-        vkBufferMemoryBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-        vkBufferMemoryBarrier.srcQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex;
-        vkBufferMemoryBarrier.dstQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex;
-        vkCmdPipelineBarrier(transferStructure.transferBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0,
-                             0, nullptr, 1, &vkBufferMemoryBarrier, 0, nullptr);
-    }
-    CommandBufferUtils::vulkanSubmitCommandBuffer(transferQueue, transferStructure.transferBuffer,
-                                                  std::vector<VkSemaphore>(), std::vector<VkSemaphore>(), nullptr,
-                                                  transferStructure.transferAvailableFence);
+    copyBufferHostDevice(vulkanHandles, physicalDeviceInfo, transferStructure, stagingBuffer, vertexBuffer,
+                         VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                         physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
 
     Bitmap *image = new Bitmap(FileLoader::getPath("Resources/dog.bmp"));
 

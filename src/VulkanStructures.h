@@ -52,6 +52,7 @@ struct SwapchainReferences {
 struct TransferStructure {
     VkCommandBuffer transferBuffer;
     VkFence transferAvailableFence;
+    VkQueue transferQueue;
 };
 
 struct VulkanHandles {

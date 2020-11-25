@@ -77,7 +77,6 @@ VkShaderModule vulkanCreateShaderModule(const VulkanHandles vulkanHandles, const
 }
 
 
-
 VkFramebuffer vulkanCreateFrameBuffer(const VulkanHandles vulkanHandles, uint32_t width, uint32_t height,
                                       const VkImageView imageView) {
     VkFramebufferCreateInfo vkFramebufferCreateInfo{};
@@ -174,6 +173,36 @@ Buffer allocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo p
     VK_ASSERT(vkBindBufferMemory(vulkanHandles.device, buffer.buffer, buffer.deviceMemory, 0));
 
     return buffer;
+}
+
+void copyBufferHostDevice(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo,
+                          TransferStructure transferStructure, Buffer source, Buffer destination,
+                          VkAccessFlags dstAccess, VkPipelineStageFlags dstStageMask, uint32_t dstQueueFamilyIndex) {
+    CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, transferStructure.transferBuffer,
+                                                 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+                                                 {transferStructure.transferAvailableFence});
+    {
+        VkBufferCopy vkBufferCopy{};
+        vkBufferCopy.size = destination.size;
+        vkBufferCopy.srcOffset = 0;
+        vkBufferCopy.dstOffset = 0;
+        vkCmdCopyBuffer(transferStructure.transferBuffer, source.buffer, destination.buffer, 1, &vkBufferCopy);
+        VkBufferMemoryBarrier vkBufferMemoryBarrier{};
+        vkBufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        vkBufferMemoryBarrier.buffer = destination.buffer;
+        vkBufferMemoryBarrier.size = VK_WHOLE_SIZE;
+        vkBufferMemoryBarrier.offset = 0;
+        vkBufferMemoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+        vkBufferMemoryBarrier.dstAccessMask = dstAccess;
+        vkBufferMemoryBarrier.srcQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex;
+        vkBufferMemoryBarrier.dstQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex;
+        vkCmdPipelineBarrier(transferStructure.transferBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             dstStageMask, 0,
+                             0, nullptr, 1, &vkBufferMemoryBarrier, 0, nullptr);
+    }
+    CommandBufferUtils::vulkanSubmitCommandBuffer(transferStructure.transferQueue, transferStructure.transferBuffer,
+                                                  std::vector<VkSemaphore>(), std::vector<VkSemaphore>(), nullptr,
+                                                  transferStructure.transferAvailableFence);
 }
 
 std::vector<VkImage>
