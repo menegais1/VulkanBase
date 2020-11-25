@@ -316,55 +316,12 @@ int main() {
                          physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
 
     Bitmap *image = new Bitmap(FileLoader::getPath("Resources/dog.bmp"));
+    Texture2D texture = createTexture2D(vulkanHandles, physicalDeviceInfo, image->originalBitmapArray,
+                                        {(uint32_t) image->width, (uint32_t) image->height},
+                                        VK_FORMAT_R32G32B32A32_SFLOAT,
+                                        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                        VK_IMAGE_ASPECT_COLOR_BIT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
 
-    VkImageCreateInfo textureCreateInfo{};
-    textureCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    textureCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-    textureCreateInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    textureCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    textureCreateInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    textureCreateInfo.extent = {(uint32_t) image->width, (uint32_t) image->height, 1};
-    textureCreateInfo.arrayLayers = 1;
-    textureCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    textureCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    textureCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    textureCreateInfo.mipLevels = 1;
-    VkImage texture;
-    VK_ASSERT(vkCreateImage(vulkanHandles.device, &textureCreateInfo, nullptr, &texture));
-    VkMemoryRequirements imageMemoryRequirements = vulkanGetImageMemoryRequirements(vulkanHandles, texture);
-    VkDeviceMemory imageDeviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo,
-                                                                  imageMemoryRequirements,
-                                                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    VK_ASSERT(vkBindImageMemory(vulkanHandles.device, texture, imageDeviceMemory, 0));
-
-    VkImageViewCreateInfo vkImageViewCreateInfo{};
-    vkImageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vkImageViewCreateInfo.image = texture;
-    vkImageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vkImageViewCreateInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vkImageViewCreateInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkImageViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                        VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-
-    VkImageView textureImageView;
-    VK_ASSERT(vkCreateImageView(vulkanHandles.device, &vkImageViewCreateInfo, nullptr, &textureImageView));
-
-    VkSamplerCreateInfo textureSamplerInfo{};
-    textureSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    textureSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    textureSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    textureSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    textureSamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
-    textureSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    textureSamplerInfo.anisotropyEnable = VK_FALSE;
-    textureSamplerInfo.compareEnable = VK_FALSE;
-    textureSamplerInfo.minFilter = VK_FILTER_LINEAR;
-    textureSamplerInfo.magFilter = VK_FILTER_LINEAR;
-    textureSamplerInfo.unnormalizedCoordinates = VK_FALSE;
-
-    VkSampler textureSampler;
-    VK_ASSERT(vkCreateSampler(vulkanHandles.device, &textureSamplerInfo, nullptr, &textureSampler));
     stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, image->width * image->height * 4 * 4,
                                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
@@ -376,7 +333,7 @@ int main() {
     {
         VkImageMemoryBarrier vkImageMemoryBarrier{};
         vkImageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        vkImageMemoryBarrier.image = texture;
+        vkImageMemoryBarrier.image = texture.image;
         vkImageMemoryBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkImageMemoryBarrier.srcAccessMask = 0;
         vkImageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -398,11 +355,11 @@ int main() {
         vkBufferImageCopy.imageOffset = {0, 0, 0};
         vkBufferImageCopy.imageSubresource = vkImageSubresourceLayers;
 
-        vkCmdCopyBufferToImage(transferStructure.transferBuffer, stagingBuffer.buffer, texture,
+        vkCmdCopyBufferToImage(transferStructure.transferBuffer, stagingBuffer.buffer, texture.image,
                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                1, &vkBufferImageCopy);
         vkImageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        vkImageMemoryBarrier.image = texture;
+        vkImageMemoryBarrier.image = texture.image;
         vkImageMemoryBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkImageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         vkImageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -440,9 +397,9 @@ int main() {
     VK_ASSERT(vkAllocateDescriptorSets(vulkanHandles.device, &textureDescriptorAllocate, &textureDescriptorSet));
 
     VkDescriptorImageInfo vkDescriptorImageInfo{};
-    vkDescriptorImageInfo.imageView = textureImageView;
+    vkDescriptorImageInfo.imageView = texture.imageView;
     vkDescriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    vkDescriptorImageInfo.sampler = textureSampler;
+    vkDescriptorImageInfo.sampler = texture.sampler;
 
     VkWriteDescriptorSet vkWriteDescriptorSet{};
     vkWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

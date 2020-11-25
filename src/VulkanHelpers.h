@@ -241,4 +241,83 @@ std::vector<VkImageView> vulkanCreateSwapchainImageViews(const VulkanHandles vul
     return imageViews;
 }
 
+
+VkImage vulkanCreateImage2D(VulkanHandles vulkanHandles, VkExtent2D extent, VkFormat format, VkImageUsageFlags usage) {
+    VkImageCreateInfo imageCreateInfo{};
+    imageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageCreateInfo.usage = usage;
+    imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageCreateInfo.format = format;
+    imageCreateInfo.extent = {extent.width, extent.height, 1};
+    imageCreateInfo.arrayLayers = 1;
+    imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageCreateInfo.mipLevels = 1;
+    VkImage image;
+    VK_ASSERT(vkCreateImage(vulkanHandles.device, &imageCreateInfo, nullptr, &image));
+    return image;
+}
+
+VkImageView
+vulkanCreateImageView2D(VulkanHandles vulkanHandles, VkImage image, VkFormat format, VkImageAspectFlags aspectMask) {
+
+    VkImageViewCreateInfo vkImageViewCreateInfo{};
+    vkImageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vkImageViewCreateInfo.image = image;
+    vkImageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vkImageViewCreateInfo.format = format;
+    vkImageViewCreateInfo.subresourceRange = {aspectMask, 0, 1, 0, 1};
+    vkImageViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                        VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+
+    VkImageView imageView;
+    VK_ASSERT(vkCreateImageView(vulkanHandles.device, &vkImageViewCreateInfo, nullptr, &imageView));
+
+    return imageView;
+
+}
+
+VkSampler vulkanCreateSampler2D(VulkanHandles vulkanHandles, VkSamplerAddressMode addressMode) {
+    VkSamplerCreateInfo textureSamplerInfo{};
+    textureSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    textureSamplerInfo.addressModeU = addressMode;
+    textureSamplerInfo.addressModeV = addressMode;
+    textureSamplerInfo.addressModeW = addressMode;
+    textureSamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    textureSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    textureSamplerInfo.anisotropyEnable = VK_FALSE;
+    textureSamplerInfo.compareEnable = VK_FALSE;
+    textureSamplerInfo.minFilter = VK_FILTER_LINEAR;
+    textureSamplerInfo.magFilter = VK_FILTER_LINEAR;
+    textureSamplerInfo.unnormalizedCoordinates = VK_FALSE;
+
+    VkSampler sampler;
+    VK_ASSERT(vkCreateSampler(vulkanHandles.device, &textureSamplerInfo, nullptr, &sampler));
+
+    return sampler;
+}
+
+Texture2D
+createTexture2D(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, void *data, VkExtent2D extents,
+                VkFormat format, VkImageUsageFlags usage,
+                VkImageAspectFlags aspectMask, VkSamplerAddressMode addressMode) {
+    Texture2D texture2D{};
+    texture2D.data = data;
+    texture2D.width = extents.width;
+    texture2D.height = extents.height;
+    texture2D.image = vulkanCreateImage2D(vulkanHandles, extents, format, usage);
+    texture2D.memoryRequirements = vulkanGetImageMemoryRequirements(vulkanHandles, texture2D.image);
+    texture2D.deviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo,
+                                                        texture2D.memoryRequirements,
+                                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VK_ASSERT(vkBindImageMemory(vulkanHandles.device, texture2D.image, texture2D.deviceMemory, 0));
+
+    texture2D.imageView = vulkanCreateImageView2D(vulkanHandles, texture2D.image, format, aspectMask);
+    texture2D.sampler = vulkanCreateSampler2D(vulkanHandles, addressMode);
+    return texture2D;
+}
+
 #endif //VULKANBASE_VULKANHELPERS_H
