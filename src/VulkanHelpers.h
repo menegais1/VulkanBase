@@ -176,17 +176,17 @@ Buffer allocateExclusiveBuffer(VulkanHandles vulkanHandles, PhysicalDeviceInfo p
 }
 
 void copyBufferHostDevice(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo,
-                          TransferStructure transferStructure, Buffer source, Buffer destination,
+                          CommandBufferStructure transferStructure, Buffer source, Buffer destination,
                           VkAccessFlags dstAccess, VkPipelineStageFlags dstStageMask, uint32_t dstQueueFamilyIndex) {
-    CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, transferStructure.transferBuffer,
+    CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, transferStructure.commandBuffer,
                                                  VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-                                                 {transferStructure.transferAvailableFence});
+                                                 {transferStructure.bufferAvaibleFence});
     {
         VkBufferCopy vkBufferCopy{};
         vkBufferCopy.size = destination.size;
         vkBufferCopy.srcOffset = 0;
         vkBufferCopy.dstOffset = 0;
-        vkCmdCopyBuffer(transferStructure.transferBuffer, source.buffer, destination.buffer, 1, &vkBufferCopy);
+        vkCmdCopyBuffer(transferStructure.commandBuffer, source.buffer, destination.buffer, 1, &vkBufferCopy);
         VkBufferMemoryBarrier vkBufferMemoryBarrier{};
         vkBufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         vkBufferMemoryBarrier.buffer = destination.buffer;
@@ -196,13 +196,13 @@ void copyBufferHostDevice(VulkanHandles vulkanHandles, PhysicalDeviceInfo physic
         vkBufferMemoryBarrier.dstAccessMask = dstAccess;
         vkBufferMemoryBarrier.srcQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex;
         vkBufferMemoryBarrier.dstQueueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex;
-        vkCmdPipelineBarrier(transferStructure.transferBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        vkCmdPipelineBarrier(transferStructure.commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                              dstStageMask, 0,
                              0, nullptr, 1, &vkBufferMemoryBarrier, 0, nullptr);
     }
-    CommandBufferUtils::vulkanSubmitCommandBuffer(transferStructure.transferQueue, transferStructure.transferBuffer,
+    CommandBufferUtils::vulkanSubmitCommandBuffer(transferStructure.queue, transferStructure.commandBuffer,
                                                   std::vector<VkSemaphore>(), std::vector<VkSemaphore>(), nullptr,
-                                                  transferStructure.transferAvailableFence);
+                                                  transferStructure.bufferAvaibleFence);
 }
 
 std::vector<VkImage>
@@ -302,7 +302,7 @@ VkSampler vulkanCreateSampler2D(VulkanHandles vulkanHandles, VkSamplerAddressMod
 Texture2D
 createTexture2D(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, void *data, VkExtent2D extents,
                 VkFormat format, VkImageUsageFlags usage,
-                VkImageAspectFlags aspectMask, VkSamplerAddressMode addressMode) {
+                VkImageAspectFlags aspectMask, VkSamplerAddressMode addressMode, VkMemoryPropertyFlagBits memoryPropertyFlags) {
     Texture2D texture2D{};
     texture2D.data = data;
     texture2D.width = extents.width;
@@ -311,7 +311,7 @@ createTexture2D(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceIn
     texture2D.memoryRequirements = vulkanGetImageMemoryRequirements(vulkanHandles, texture2D.image);
     texture2D.deviceMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo,
                                                         texture2D.memoryRequirements,
-                                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                                                        memoryPropertyFlags);
 
     VK_ASSERT(vkBindImageMemory(vulkanHandles.device, texture2D.image, texture2D.deviceMemory, 0));
 

@@ -49,10 +49,10 @@ struct SwapchainReferences {
     std::vector<VkImageView> imageViews;
 };
 
-struct TransferStructure {
-    VkCommandBuffer transferBuffer;
-    VkFence transferAvailableFence;
-    VkQueue transferQueue;
+struct CommandBufferStructure {
+    VkCommandBuffer commandBuffer;
+    VkFence bufferAvaibleFence;
+    VkQueue queue;
 };
 
 struct VulkanHandles {
