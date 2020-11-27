@@ -232,25 +232,21 @@ int main() {
     swapchainReferences.imageViews = vulkanCreateSwapchainImageViews(vulkanHandles, presentationEngineInfo,
                                                                      swapchainReferences.images);
     vulkanHandles.renderPass = vulkanCreateRenderPass(vulkanHandles, presentationEngineInfo);
+
     auto vert = vulkanLoadShader("../src/Shaders/vert.spv");
     auto frag = vulkanLoadShader("../src/Shaders/frag.spv");
     auto vertModule = vulkanCreateShaderModule(vulkanHandles, vert);
     auto fragModule = vulkanCreateShaderModule(vulkanHandles, frag);
 
-    VkDescriptorSetLayoutBinding layoutBinding0{};
-    layoutBinding0.binding = 0;
-    layoutBinding0.descriptorCount = 1;
-    layoutBinding0.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    layoutBinding0.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorPool imageSamplerPool = vulkanAllocateDescriptorPool(vulkanHandles,
+                                                                     {vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16)},
+                                                                     16);
 
 
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
-    descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutInfo.bindingCount = 1;
-    descriptorSetLayoutInfo.pBindings = &layoutBinding0;
-    VkDescriptorSetLayout vkDescriptorSetLayout0;
-    VK_ASSERT(vkCreateDescriptorSetLayout(vulkanHandles.device, &descriptorSetLayoutInfo, nullptr,
-                                          &vkDescriptorSetLayout0));
+    VkDescriptorSetLayout vkDescriptorSetLayout0 = vulkanCreateDescriptorSetLayout(vulkanHandles,
+                                                                                   {
+                                                                                           vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT),
+                                                                                           vulkanCreateDescriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)});
 
     VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo{};
     vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -264,8 +260,6 @@ int main() {
 
     vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo, vkDescriptorSetLayout0,
                                                   vkPipelineLayout, vertModule, fragModule);
-    getImageSemaphore = vulkanCreateSemaphore(vulkanHandles);
-    presentImageSemaphore = vulkanCreateSemaphore(vulkanHandles);
 
     vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex, 0,
                      &graphicsQueue);
@@ -279,11 +273,13 @@ int main() {
                                                                                      1)[0];
     transferStructure.bufferAvaibleFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
     transferStructure.queue = transferQueue;
+    transferStructure.queueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.transferFamilyIndex;
     CommandBufferStructure graphicsStructure{};
     graphicsStructure.commandBuffer = CommandBufferUtils::vulkanCreateCommandBuffers(vulkanHandles, vkGraphicsPool,
                                                                                      1)[0];
     graphicsStructure.bufferAvaibleFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
     graphicsStructure.queue = graphicsQueue;
+    graphicsStructure.queueFamilyIndex = physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex;
 
     VkRect2D viewRect{};
     viewRect.extent = presentationEngineInfo.extents;
@@ -320,90 +316,22 @@ int main() {
                          VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
                          physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
 
-    Bitmap *image = new Bitmap(FileLoader::getPath("Resources/dog.bmp"));
-    Texture2D texture = createTexture2D(vulkanHandles, physicalDeviceInfo, image->originalBitmapArray,
-                                        {(uint32_t) image->width, (uint32_t) image->height},
-                                        VK_FORMAT_R32G32B32A32_SFLOAT,
-                                        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                        VK_IMAGE_ASPECT_COLOR_BIT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    Bitmap *image1 = new Bitmap(FileLoader::getPath("Resources/dog.bmp"));
+    Texture2D texture1 = createTexture2D(vulkanHandles, physicalDeviceInfo, image1->originalBitmapArray,
+                                         {(uint32_t) image1->width, (uint32_t) image1->height},
+                                         VK_FORMAT_R32G32B32A32_SFLOAT,
+                                         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                         VK_IMAGE_ASPECT_COLOR_BIT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, image->width * image->height * 4 * 4,
+    stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, image1->width * image1->height * 4 * 4,
                                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
-    vulkanMapMemoryWithFlush(vulkanHandles, stagingBuffer, image->originalBitmapArray);
+    vulkanMapMemoryWithFlush(vulkanHandles, stagingBuffer, image1->originalBitmapArray);
 
-    VkImageMemoryBarrier vkImageMemoryBarrier{};
-    vkImageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, transferStructure.commandBuffer,
-                                                 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-                                                 {transferStructure.bufferAvaibleFence});
-    {
-        vkImageMemoryBarrier.image = texture.image;
-        vkImageMemoryBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkImageMemoryBarrier.srcAccessMask = 0;
-        vkImageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkImageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        vkImageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        vkImageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        vkImageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-        vkCmdPipelineBarrier(transferStructure.commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
-                             nullptr, 0, nullptr,
-                             1, &vkImageMemoryBarrier);
-        VkImageSubresourceLayers vkImageSubresourceLayers = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        VkBufferImageCopy vkBufferImageCopy{};
-        vkBufferImageCopy.imageExtent = {(uint32_t) image->width, (uint32_t) image->height, 1};
-        vkBufferImageCopy.bufferImageHeight = 0;
-        vkBufferImageCopy.bufferRowLength = 0;
-        vkBufferImageCopy.bufferOffset = 0;
-        vkBufferImageCopy.imageOffset = {0, 0, 0};
-        vkBufferImageCopy.imageSubresource = vkImageSubresourceLayers;
-
-        vkCmdCopyBufferToImage(transferStructure.commandBuffer, stagingBuffer.buffer, texture.image,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               1, &vkBufferImageCopy);
-    }
-    CommandBufferUtils::vulkanSubmitCommandBuffer(transferQueue, transferStructure.commandBuffer,
-                                                  std::vector<VkSemaphore>(), std::vector<VkSemaphore>(), nullptr,
-                                                  transferStructure.bufferAvaibleFence);
-
-
-    CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, graphicsStructure.commandBuffer,
-                                                 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-                                                 {graphicsStructure.bufferAvaibleFence});
-    {
-        vkImageMemoryBarrier.image = texture.image;
-        vkImageMemoryBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkImageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkImageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkImageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        vkImageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        vkImageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        vkImageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-        vkCmdPipelineBarrier(graphicsStructure.commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
-                             nullptr, 0, nullptr,
-                             1, &vkImageMemoryBarrier);
-    }
-
-    CommandBufferUtils::vulkanSubmitCommandBuffer(graphicsStructure.queue, graphicsStructure.commandBuffer,
-                                                  std::vector<VkSemaphore>(), std::vector<VkSemaphore>(), nullptr,
-                                                  graphicsStructure.bufferAvaibleFence);
-
-    vkDeviceWaitIdle(vulkanHandles.device);
-    VkDescriptorPoolSize vkDescriptorPoolSize{};
-    vkDescriptorPoolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    vkDescriptorPoolSize.descriptorCount = 1;
-    VkDescriptorPoolCreateInfo vkDescriptorPoolCreateInfo{};
-    vkDescriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    vkDescriptorPoolCreateInfo.poolSizeCount = 1;
-    vkDescriptorPoolCreateInfo.pPoolSizes = &vkDescriptorPoolSize;
-    vkDescriptorPoolCreateInfo.maxSets = 1;
-    VkDescriptorPool imageSamplerPool;
-    VK_ASSERT(vkCreateDescriptorPool(vulkanHandles.device, &vkDescriptorPoolCreateInfo, nullptr, &imageSamplerPool));
+    copyBufferTextureHostDevice(vulkanHandles, transferStructure, stagingBuffer, texture1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, transferStructure.queueFamilyIndex);
+    transitionImageInPipeline(vulkanHandles, graphicsStructure, texture1, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
     VkDescriptorSetAllocateInfo textureDescriptorAllocate{};
     textureDescriptorAllocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -414,9 +342,9 @@ int main() {
     VK_ASSERT(vkAllocateDescriptorSets(vulkanHandles.device, &textureDescriptorAllocate, &textureDescriptorSet));
 
     VkDescriptorImageInfo vkDescriptorImageInfo{};
-    vkDescriptorImageInfo.imageView = texture.imageView;
+    vkDescriptorImageInfo.imageView = texture1.imageView;
     vkDescriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    vkDescriptorImageInfo.sampler = texture.sampler;
+    vkDescriptorImageInfo.sampler = texture1.sampler;
 
     VkWriteDescriptorSet vkWriteDescriptorSet{};
     vkWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

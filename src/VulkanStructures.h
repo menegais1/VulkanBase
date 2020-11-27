@@ -53,6 +53,7 @@ struct CommandBufferStructure {
     VkCommandBuffer commandBuffer;
     VkFence bufferAvaibleFence;
     VkQueue queue;
+    uint32_t queueFamilyIndex;
 };
 
 struct VulkanHandles {
