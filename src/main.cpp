@@ -238,15 +238,16 @@ int main() {
     auto vertModule = vulkanCreateShaderModule(vulkanHandles, vert);
     auto fragModule = vulkanCreateShaderModule(vulkanHandles, frag);
 
-    VkDescriptorPool imageSamplerPool = vulkanAllocateDescriptorPool(vulkanHandles,
-                                                                     {vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16)},
-                                                                     16);
+    VkDescriptorPool descriptorPool = vulkanAllocateDescriptorPool(vulkanHandles,
+                                                                   {vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16),
+                                                                    vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16)},
+                                                                   16);
 
 
     VkDescriptorSetLayout vkDescriptorSetLayout0 = vulkanCreateDescriptorSetLayout(vulkanHandles,
                                                                                    {
                                                                                            vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT),
-                                                                                           vulkanCreateDescriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)});
+                                                                                           vulkanCreateDescriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)});
 
     VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo{};
     vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -333,9 +334,20 @@ int main() {
     transitionImageInPipeline(vulkanHandles, graphicsStructure, texture1, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
+
+    struct UniformBufferTest {
+        float s;
+        float t;
+    };
+
+    UniformBufferTest test = {0, 0};
+
+    Buffer uniformTestBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, sizeof(UniformBufferTest), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    vulkanMapMemoryWithFlush(vulkanHandles, uniformTestBuffer, &test);
+
     VkDescriptorSetAllocateInfo textureDescriptorAllocate{};
     textureDescriptorAllocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    textureDescriptorAllocate.descriptorPool = imageSamplerPool;
+    textureDescriptorAllocate.descriptorPool = descriptorPool;
     textureDescriptorAllocate.descriptorSetCount = 1;
     textureDescriptorAllocate.pSetLayouts = &vkDescriptorSetLayout0;
     VkDescriptorSet textureDescriptorSet;
@@ -345,6 +357,11 @@ int main() {
     vkDescriptorImageInfo.imageView = texture1.imageView;
     vkDescriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     vkDescriptorImageInfo.sampler = texture1.sampler;
+
+    VkDescriptorBufferInfo vkDescriptorTestBufferInfo{};
+    vkDescriptorTestBufferInfo.buffer = uniformTestBuffer.buffer;
+    vkDescriptorTestBufferInfo.range = uniformTestBuffer.size;
+    vkDescriptorTestBufferInfo.offset = 0;
 
     VkWriteDescriptorSet vkWriteDescriptorSet{};
     vkWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -357,7 +374,20 @@ int main() {
     vkWriteDescriptorSet.pBufferInfo = nullptr;
     vkWriteDescriptorSet.pTexelBufferView = nullptr;
 
-    vkUpdateDescriptorSets(vulkanHandles.device, 1, &vkWriteDescriptorSet, 0, nullptr);
+    VkWriteDescriptorSet vkWriteDescriptorUniformSet{};
+    vkWriteDescriptorUniformSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    vkWriteDescriptorUniformSet.descriptorCount = 1;
+    vkWriteDescriptorUniformSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    vkWriteDescriptorUniformSet.pImageInfo = nullptr;
+    vkWriteDescriptorUniformSet.dstSet = textureDescriptorSet;
+    vkWriteDescriptorUniformSet.dstBinding = 1;
+    vkWriteDescriptorUniformSet.dstArrayElement = 0;
+    vkWriteDescriptorUniformSet.pBufferInfo = &vkDescriptorTestBufferInfo;
+    vkWriteDescriptorUniformSet.pTexelBufferView = nullptr;
+
+    std::vector<VkWriteDescriptorSet> descriptorWriteInfo = {vkWriteDescriptorSet, vkWriteDescriptorUniformSet};
+
+    vkUpdateDescriptorSets(vulkanHandles.device, descriptorWriteInfo.size(), descriptorWriteInfo.data(), 0, nullptr);
     Buffer indexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
                                                  sizeof(uint32_t) * indexData.size(),
                                                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
@@ -400,6 +430,13 @@ int main() {
             vkRenderPassBeginInfo.renderArea = viewRect;
             vkRenderPassBeginInfo.clearValueCount = 1;
             vkRenderPassBeginInfo.pClearValues = &vkClearValue;
+
+            test.s += 0.0001;
+            test.t += 0.0001;
+            if (test.s > 1) test.s = 0;
+            if (test.t > 1) test.t = 0;
+            vulkanMapMemoryWithFlush(vulkanHandles,uniformTestBuffer,&test);
+
 
             CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, renderFrame.commandBuffer, 0);
             {
