@@ -173,7 +173,8 @@ vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngi
 
 VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo, VkPipelineLayout vkPipelineLayout,
                                 const VkShaderModule vertexShaderModule,
-                                const VkShaderModule fragmentShaderModule, const VkShaderModule tesselationControlShaderModule) {
+                                const VkShaderModule fragmentShaderModule, const VkShaderModule tesselationControlShaderModule,
+                                const VkShaderModule tesselationEvaluationShaderModule) {
 
 
 
@@ -214,6 +215,7 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     VkPipelineInputAssemblyStateCreateInfo vkPipelineInputAssemblyStateCreateInfo{};
     vkPipelineInputAssemblyStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     vkPipelineInputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+//    vkPipelineInputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     vkPipelineInputAssemblyStateCreateInfo.primitiveRestartEnable = VK_FALSE;
 
     VkPipelineTessellationStateCreateInfo vkPipelineTessellationStateCreateInfo{};
@@ -291,13 +293,18 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkTesselationControlShaderStageCreateInfo.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
     vkTesselationControlShaderStageCreateInfo.pName = "main";
     vkTesselationControlShaderStageCreateInfo.module = tesselationControlShaderModule;
+    VkPipelineShaderStageCreateInfo vkTesselationEvaluationShaderStageCreateInfo{};
+    vkTesselationEvaluationShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vkTesselationEvaluationShaderStageCreateInfo.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+    vkTesselationEvaluationShaderStageCreateInfo.pName = "main";
+    vkTesselationEvaluationShaderStageCreateInfo.module = tesselationEvaluationShaderModule;
 
-    VkPipelineShaderStageCreateInfo stages[3]{vkVertexShaderStageCreateInfo, vkFragmentShaderStageCreateInfo, vkTesselationControlShaderStageCreateInfo};
+    VkPipelineShaderStageCreateInfo stages[4]{vkVertexShaderStageCreateInfo, vkFragmentShaderStageCreateInfo, vkTesselationControlShaderStageCreateInfo, vkTesselationEvaluationShaderStageCreateInfo};
     VkGraphicsPipelineCreateInfo vkGraphicsPipelineCreateInfo{};
     vkGraphicsPipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     vkGraphicsPipelineCreateInfo.renderPass = vulkanHandles.renderPass;
     vkGraphicsPipelineCreateInfo.subpass = 0;
-    vkGraphicsPipelineCreateInfo.stageCount = 2;
+    vkGraphicsPipelineCreateInfo.stageCount = 4;
     vkGraphicsPipelineCreateInfo.pStages = stages;
     vkGraphicsPipelineCreateInfo.pColorBlendState = &vkPipelineColorBlendStateCreateInfo;
     vkGraphicsPipelineCreateInfo.pVertexInputState = &vkVertexInputStateCreateInfo;
@@ -347,9 +354,11 @@ int main() {
     auto vert = vulkanLoadShader("../src/Shaders/vert.spv");
     auto frag = vulkanLoadShader("../src/Shaders/frag.spv");
     auto tessControl = vulkanLoadShader("../src/Shaders/tessControl.spv");
+    auto tessEval = vulkanLoadShader("../src/Shaders/tessEval.spv");
     auto vertModule = vulkanCreateShaderModule(vulkanHandles, vert);
     auto fragModule = vulkanCreateShaderModule(vulkanHandles, frag);
     auto tessModule = vulkanCreateShaderModule(vulkanHandles, tessControl);
+    auto tessEvalModule = vulkanCreateShaderModule(vulkanHandles, tessEval);
 
     VkDescriptorPool descriptorPool = vulkanAllocateDescriptorPool(vulkanHandles,
                                                                    {vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16),
@@ -361,7 +370,7 @@ int main() {
                                                                                    {
                                                                                            vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT),
                                                                                            vulkanCreateDescriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)});
-    VkDescriptorSetLayout vkDescriptorSetLayout1 = vulkanCreateDescriptorSetLayout(vulkanHandles, {vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)});
+    VkDescriptorSetLayout vkDescriptorSetLayout1 = vulkanCreateDescriptorSetLayout(vulkanHandles, {vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT)});
     VkDescriptorSetLayout vkDescriptorSetLayout2 = vulkanCreateDescriptorSetLayout(vulkanHandles,
                                                                                    {vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT)});
 
@@ -377,7 +386,7 @@ int main() {
     VK_ASSERT(vkCreatePipelineLayout(vulkanHandles.device, &vkPipelineLayoutCreateInfo, nullptr, &vkPipelineLayout));
 
     vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo,
-                                                  vkPipelineLayout, vertModule, fragModule, tessModule);
+                                                  vkPipelineLayout, vertModule, fragModule, tessModule,tessEvalModule);
 
     vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex, 0,
                      &graphicsQueue);
@@ -494,8 +503,8 @@ int main() {
     mvp.projetion = glm::perspective(45.0, 1.0, 0.001, 1000.0);
 
     TessInfo tessInfo{};
-    tessInfo.tessLevelInner = 10;
-    tessInfo.tessLevelOuter = glm::vec3(1, 2, 1);
+    tessInfo.tessLevelInner = 2;
+    tessInfo.tessLevelOuter = glm::vec3(1, 1, 1);
 
     camera.positionCameraCenter();
 

@@ -1,3 +1,5 @@
+#version 450
+
 //Layout specification.
 layout (triangles, equal_spacing, ccw) in;
 

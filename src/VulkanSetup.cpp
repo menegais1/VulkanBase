@@ -246,11 +246,13 @@ VulkanSetup::vulkanCreateLogicalDevice(const VulkanHandles vulkanHandles, const 
         count++;
     }
 
-    VkPhysicalDeviceFeatures vkPhysicalDeviceFeatures{};
+    if(physicalDeviceInfo.physicalDeviceFeatures.tessellationShader == VK_TRUE){
+        std::cout << "TESSELATION IS PRESENT" << std::endl;
+    }
 
     VkDeviceCreateInfo vkDeviceCreateInfo{};
     vkDeviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    vkDeviceCreateInfo.pEnabledFeatures = &vkPhysicalDeviceFeatures;
+    vkDeviceCreateInfo.pEnabledFeatures = &physicalDeviceInfo.physicalDeviceFeatures;
     vkDeviceCreateInfo.queueCreateInfoCount = queueFamilyIndex.size();
     vkDeviceCreateInfo.pQueueCreateInfos = vkDeviceQueueCreateInfo;
     vkDeviceCreateInfo.enabledLayerCount = 0;
