@@ -18,7 +18,7 @@
 
 int const WIDTH = 300;
 int const HEIGHT = 300;
-
+#define PI 3.14159265359
 struct InputVertex {
     glm::vec3 position;
     glm::vec3 color;
@@ -30,6 +30,93 @@ struct MVP {
     glm::mat4 view;
     glm::mat4 projetion;
 };
+
+struct Camera {
+    float speed = 2;
+    glm::vec3 eye = glm::vec3(0, 0, 1);
+    glm::vec3 center = glm::vec3(1, 0, 0);
+    glm::vec3 up = glm::vec3(0, 1, 0);
+    glm::vec2 angle;
+    bool isDragging;
+
+    void positionCameraCenter() {
+        glm::vec3 direction;
+        direction.x = cos(angle.y * PI / 180.0) * cos(angle.x * PI / 180.0);
+        direction.y = sin(angle.x * PI / 180.0);
+        direction.z = sin(angle.y * PI / 180.0) * cos(angle.x * PI / 180.0);
+        std::cout << direction.x << " " << direction.y << " " << direction.z << std::endl;
+        center = eye + glm::normalize(direction);
+    }
+} camera;
+
+glm::vec2 lastMousePosition;
+float mouseSensitivity = 0.5;
+
+void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods) {
+    float moveSpeed = camera.speed * 0.01;
+
+    glm::vec3 forward = glm::normalize(camera.center - camera.eye);
+    glm::vec3 right = glm::normalize(glm::cross(forward, camera.up));
+    if (key == GLFW_KEY_W) {
+        camera.eye = camera.eye + forward * moveSpeed;
+        camera.center = camera.center + forward * moveSpeed;
+        camera.up = glm::vec3(0, 1, 0);
+
+    } else if (key == GLFW_KEY_S) {
+        camera.eye = camera.eye + forward * -moveSpeed;
+        camera.center = camera.center + forward * -moveSpeed;
+        camera.up = glm::vec3(0, 1, 0);
+    } else if (key == GLFW_KEY_D) {
+        camera.eye = camera.eye + right * moveSpeed;
+        camera.center = camera.center + right * moveSpeed;
+        camera.up = glm::vec3(0, 1, 0);
+
+    } else if (key == GLFW_KEY_A) {
+        camera.eye = camera.eye + right * -moveSpeed;
+        camera.center = camera.center + right * -moveSpeed;
+        camera.up = glm::vec3(0, 1, 0);
+    } else if (key == GLFW_KEY_Q) {
+        camera.eye = camera.eye + glm::vec3(0, 1, 0) * moveSpeed;
+        camera.center = camera.center + glm::vec3(0, 1, 0) * moveSpeed;
+        camera.up = glm::vec3(0, 1, 0);
+
+    } else if (key == GLFW_KEY_E) {
+        camera.eye = camera.eye + glm::vec3(0, 1, 0) * -moveSpeed;
+        camera.center = camera.center + glm::vec3(0, 1, 0) * -moveSpeed;
+        camera.up = glm::vec3(0, 1, 0);
+    }
+}
+
+void mouseButton(GLFWwindow *window, int button, int action, int modifier) {
+    if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+        camera.isDragging = true;
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) {
+        camera.isDragging = false;
+    }
+}
+
+void mouseMovement(GLFWwindow *window, double xpos, double ypos) {
+    if (camera.isDragging) {
+
+        float xDelta = (xpos - lastMousePosition.x);
+        float yDelta = (ypos - lastMousePosition.y);
+        float xOffset = xDelta * mouseSensitivity;
+        float yOffset = yDelta * mouseSensitivity;
+
+        camera.angle.x += yOffset;
+        camera.angle.y += xOffset;
+
+        if (camera.angle.x >= 89) {
+            camera.angle.x = 89;
+        } else if (camera.angle.x <= -89) {
+            camera.angle.x = -89;
+        }
+
+        camera.positionCameraCenter();
+    }
+    lastMousePosition = glm::vec2(xpos, ypos);
+
+}
 
 VkRenderPass
 vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo) {
@@ -217,8 +304,10 @@ int main() {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-
     GLFWwindow *window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan HelloTriangle", nullptr, nullptr);
+    glfwSetKeyCallback(window, keyboard);
+    glfwSetMouseButtonCallback(window, mouseButton);
+    glfwSetCursorPosCallback(window, mouseMovement);
     VulkanHandles vulkanHandles{};
     PhysicalDeviceInfo physicalDeviceInfo;
     PresentationEngineInfo presentationEngineInfo;
@@ -393,8 +482,8 @@ int main() {
 
     MVP mvp{};
     mvp.model = glm::mat4(1);
-    mvp.view = glm::lookAt(glm::vec3(1, 1, 1), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
     mvp.projetion = glm::perspective(45.0, 1.0, 0.001, 1000.0);
+    camera.positionCameraCenter();
 
     int renderFramesAmount = 2;
     std::vector<RenderFrame> renderFrames(renderFramesAmount);
@@ -433,6 +522,7 @@ int main() {
             vkRenderPassBeginInfo.pClearValues = &vkClearValue;
 
 
+            mvp.view = glm::lookAt(camera.eye, camera.center, camera.up);
             vulkanMapMemoryWithFlush(vulkanHandles, mvpBuffer, &mvp);
 
 
