@@ -31,6 +31,11 @@ struct MVP {
     glm::mat4 projetion;
 };
 
+struct TessInfo {
+    glm::vec3 tessLevelOuter;
+    float tessLevelInner;
+};
+
 struct Camera {
     float speed = 2;
     glm::vec3 eye = glm::vec3(0, 0, 1);
@@ -166,10 +171,9 @@ vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngi
     return vkRenderPass;
 }
 
-VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo,
-                                VkDescriptorSetLayout descriptorSetLayout, VkPipelineLayout vkPipelineLayout,
+VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo, VkPipelineLayout vkPipelineLayout,
                                 const VkShaderModule vertexShaderModule,
-                                const VkShaderModule fragmentShaderModule) {
+                                const VkShaderModule fragmentShaderModule, const VkShaderModule tesselationControlShaderModule) {
 
 
 
@@ -209,8 +213,12 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     ///////
     VkPipelineInputAssemblyStateCreateInfo vkPipelineInputAssemblyStateCreateInfo{};
     vkPipelineInputAssemblyStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    vkPipelineInputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    vkPipelineInputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
     vkPipelineInputAssemblyStateCreateInfo.primitiveRestartEnable = VK_FALSE;
+
+    VkPipelineTessellationStateCreateInfo vkPipelineTessellationStateCreateInfo{};
+    vkPipelineTessellationStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+    vkPipelineTessellationStateCreateInfo.patchControlPoints = 3;
 
     VkViewport vkViewport{};
     vkViewport.width = presentationEngineInfo.extents.width;
@@ -240,7 +248,8 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkPipelineRasterizationStateCreateInfo.depthBiasSlopeFactor = 0;
     vkPipelineRasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     vkPipelineRasterizationStateCreateInfo.cullMode = VK_CULL_MODE_NONE;
-    vkPipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
+//    vkPipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
+    vkPipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_LINE;
     vkPipelineRasterizationStateCreateInfo.lineWidth = 1.0;
 
     VkPipelineMultisampleStateCreateInfo vkPipelineMultisampleStateCreateInfo{};
@@ -277,7 +286,13 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkFragmentShaderStageCreateInfo.pName = "main";
     vkFragmentShaderStageCreateInfo.module = fragmentShaderModule;
 
-    VkPipelineShaderStageCreateInfo stages[2]{vkVertexShaderStageCreateInfo, vkFragmentShaderStageCreateInfo};
+    VkPipelineShaderStageCreateInfo vkTesselationControlShaderStageCreateInfo{};
+    vkTesselationControlShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vkTesselationControlShaderStageCreateInfo.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+    vkTesselationControlShaderStageCreateInfo.pName = "main";
+    vkTesselationControlShaderStageCreateInfo.module = tesselationControlShaderModule;
+
+    VkPipelineShaderStageCreateInfo stages[3]{vkVertexShaderStageCreateInfo, vkFragmentShaderStageCreateInfo, vkTesselationControlShaderStageCreateInfo};
     VkGraphicsPipelineCreateInfo vkGraphicsPipelineCreateInfo{};
     vkGraphicsPipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     vkGraphicsPipelineCreateInfo.renderPass = vulkanHandles.renderPass;
@@ -290,6 +305,7 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkGraphicsPipelineCreateInfo.pMultisampleState = &vkPipelineMultisampleStateCreateInfo;
     vkGraphicsPipelineCreateInfo.pViewportState = &vkPipelineViewportStateCreateInfo;
     vkGraphicsPipelineCreateInfo.pRasterizationState = &vkPipelineRasterizationStateCreateInfo;
+    vkGraphicsPipelineCreateInfo.pTessellationState = &vkPipelineTessellationStateCreateInfo;
     vkGraphicsPipelineCreateInfo.pDynamicState = nullptr;
     vkGraphicsPipelineCreateInfo.layout = vkPipelineLayout;
 
@@ -330,8 +346,10 @@ int main() {
 
     auto vert = vulkanLoadShader("../src/Shaders/vert.spv");
     auto frag = vulkanLoadShader("../src/Shaders/frag.spv");
+    auto tessControl = vulkanLoadShader("../src/Shaders/tessControl.spv");
     auto vertModule = vulkanCreateShaderModule(vulkanHandles, vert);
     auto fragModule = vulkanCreateShaderModule(vulkanHandles, frag);
+    auto tessModule = vulkanCreateShaderModule(vulkanHandles, tessControl);
 
     VkDescriptorPool descriptorPool = vulkanAllocateDescriptorPool(vulkanHandles,
                                                                    {vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16),
@@ -344,8 +362,10 @@ int main() {
                                                                                            vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT),
                                                                                            vulkanCreateDescriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)});
     VkDescriptorSetLayout vkDescriptorSetLayout1 = vulkanCreateDescriptorSetLayout(vulkanHandles, {vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)});
+    VkDescriptorSetLayout vkDescriptorSetLayout2 = vulkanCreateDescriptorSetLayout(vulkanHandles,
+                                                                                   {vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT)});
 
-    std::vector<VkDescriptorSetLayout> descriptorSetLayouts = {vkDescriptorSetLayout0, vkDescriptorSetLayout1};
+    std::vector<VkDescriptorSetLayout> descriptorSetLayouts = {vkDescriptorSetLayout0, vkDescriptorSetLayout1, vkDescriptorSetLayout2};
     VkPipelineLayoutCreateInfo vkPipelineLayoutCreateInfo{};
     vkPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     vkPipelineLayoutCreateInfo.setLayoutCount = descriptorSetLayouts.size();
@@ -356,8 +376,8 @@ int main() {
     VkPipelineLayout vkPipelineLayout;
     VK_ASSERT(vkCreatePipelineLayout(vulkanHandles.device, &vkPipelineLayoutCreateInfo, nullptr, &vkPipelineLayout));
 
-    vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo, vkDescriptorSetLayout0,
-                                                  vkPipelineLayout, vertModule, fragModule);
+    vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo,
+                                                  vkPipelineLayout, vertModule, fragModule, tessModule);
 
     vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex, 0,
                      &graphicsQueue);
@@ -433,43 +453,32 @@ int main() {
 
 
     Buffer mvpBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, sizeof(MVP), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-
+    Buffer tessInfoBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, sizeof(TessInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
     VkDescriptorSet textureDescriptorSet = vulkanAllocateDescriptorSet(vulkanHandles, descriptorPool, vkDescriptorSetLayout0);
     VkDescriptorSet mvpDescriptorSet = vulkanAllocateDescriptorSet(vulkanHandles, descriptorPool, vkDescriptorSetLayout1);
+    VkDescriptorSet tessInfoDescriptorSet = vulkanAllocateDescriptorSet(vulkanHandles, descriptorPool, vkDescriptorSetLayout2);
 
     VkDescriptorImageInfo vkDescriptorImageInfo{};
     vkDescriptorImageInfo.imageView = texture1.imageView;
     vkDescriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     vkDescriptorImageInfo.sampler = texture1.sampler;
 
-    VkWriteDescriptorSet vkWriteDescriptorSet{};
-    vkWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    vkWriteDescriptorSet.descriptorCount = 1;
-    vkWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    vkWriteDescriptorSet.pImageInfo = &vkDescriptorImageInfo;
-    vkWriteDescriptorSet.dstSet = textureDescriptorSet;
-    vkWriteDescriptorSet.dstBinding = 0;
-    vkWriteDescriptorSet.dstArrayElement = 0;
-    vkWriteDescriptorSet.pBufferInfo = nullptr;
-    vkWriteDescriptorSet.pTexelBufferView = nullptr;
+    VkWriteDescriptorSet vkWriteDescriptorSet = vulkanGetWriteDescriptorSet(vulkanHandles, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, textureDescriptorSet, 0, nullptr, &vkDescriptorImageInfo);
 
     VkDescriptorBufferInfo mvpBufferInfo{};
     mvpBufferInfo.buffer = mvpBuffer.buffer;
     mvpBufferInfo.range = mvpBuffer.size;
     mvpBufferInfo.offset = 0;
 
-    VkWriteDescriptorSet mvpBufferDescriptorWrite{};
-    mvpBufferDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    mvpBufferDescriptorWrite.descriptorCount = 1;
-    mvpBufferDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    mvpBufferDescriptorWrite.pImageInfo = nullptr;
-    mvpBufferDescriptorWrite.dstSet = mvpDescriptorSet;
-    mvpBufferDescriptorWrite.dstBinding = 0;
-    mvpBufferDescriptorWrite.dstArrayElement = 0;
-    mvpBufferDescriptorWrite.pBufferInfo = &mvpBufferInfo;
-    mvpBufferDescriptorWrite.pTexelBufferView = nullptr;
+    VkWriteDescriptorSet mvpBufferDescriptorWrite = vulkanGetWriteDescriptorSet(vulkanHandles, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, mvpDescriptorSet, 0, &mvpBufferInfo, nullptr);
 
-    std::vector<VkWriteDescriptorSet> descriptorWriteInfo = {vkWriteDescriptorSet, mvpBufferDescriptorWrite};
+    VkDescriptorBufferInfo tessInfoBufferInfo{};
+    tessInfoBufferInfo.buffer = tessInfoBuffer.buffer;
+    tessInfoBufferInfo.range = tessInfoBuffer.size;
+    tessInfoBufferInfo.offset = 0;
+    VkWriteDescriptorSet tessInfoBufferDescriptorWrite = vulkanGetWriteDescriptorSet(vulkanHandles, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, tessInfoDescriptorSet, 0, &tessInfoBufferInfo, nullptr);
+
+    std::vector<VkWriteDescriptorSet> descriptorWriteInfo = {vkWriteDescriptorSet, mvpBufferDescriptorWrite, tessInfoBufferDescriptorWrite};
 
     vkUpdateDescriptorSets(vulkanHandles.device, descriptorWriteInfo.size(), descriptorWriteInfo.data(), 0, nullptr);
     Buffer indexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
@@ -483,6 +492,11 @@ int main() {
     MVP mvp{};
     mvp.model = glm::mat4(1);
     mvp.projetion = glm::perspective(45.0, 1.0, 0.001, 1000.0);
+
+    TessInfo tessInfo{};
+    tessInfo.tessLevelInner = 10;
+    tessInfo.tessLevelOuter = glm::vec3(1, 2, 1);
+
     camera.positionCameraCenter();
 
     int renderFramesAmount = 2;
@@ -525,6 +539,8 @@ int main() {
             mvp.view = glm::lookAt(camera.eye, camera.center, camera.up);
             vulkanMapMemoryWithFlush(vulkanHandles, mvpBuffer, &mvp);
 
+            vulkanMapMemoryWithFlush(vulkanHandles, tessInfoBuffer, &tessInfo);
+
 
             CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, renderFrame.commandBuffer, 0);
             {
@@ -540,6 +556,10 @@ int main() {
                 vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 1,
                                         1,
                                         &mvpDescriptorSet, 0,
+                                        nullptr);
+                vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 2,
+                                        1,
+                                        &tessInfoDescriptorSet, 0,
                                         nullptr);
                 vkCmdDrawIndexed(renderFrame.commandBuffer, indexData.size(), 1, 0, 0, 1);
                 vkCmdEndRenderPass(renderFrame.commandBuffer);

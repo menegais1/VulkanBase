@@ -74,7 +74,7 @@ struct Buffer {
 };
 
 struct Texture2D {
-    void* data;
+    void *data;
     uint32_t width;
     uint32_t height;
     VkImage image;
@@ -83,6 +83,7 @@ struct Texture2D {
     VkMemoryRequirements memoryRequirements;
     VkDeviceMemory deviceMemory;
 };
+
 
 
 #endif

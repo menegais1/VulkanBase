@@ -433,7 +433,7 @@ void transitionImageInPipeline(VulkanHandles vulkanHandles, CommandBufferStructu
                                                   graphicsStructure.bufferAvaibleFence);
 }
 
-VkDescriptorSet vulkanAllocateDescriptorSet(VulkanHandles vulkanHandles, VkDescriptorPool descriptorPool, VkDescriptorSetLayout descriptorSetLayout){
+VkDescriptorSet vulkanAllocateDescriptorSet(VulkanHandles vulkanHandles, VkDescriptorPool descriptorPool, VkDescriptorSetLayout descriptorSetLayout) {
     VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
     descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     descriptorSetAllocateInfo.descriptorPool = descriptorPool;
@@ -442,6 +442,23 @@ VkDescriptorSet vulkanAllocateDescriptorSet(VulkanHandles vulkanHandles, VkDescr
     VkDescriptorSet descriptorSet;
     VK_ASSERT(vkAllocateDescriptorSets(vulkanHandles.device, &descriptorSetAllocateInfo, &descriptorSet));
     return descriptorSet;
+}
+
+VkWriteDescriptorSet vulkanGetWriteDescriptorSet(VulkanHandles vulkanHandles, int descriptorCount,
+                                                 VkDescriptorType descriptorType, VkDescriptorSet descriptorSet, uint32_t dstBinding,
+                                                 VkDescriptorBufferInfo *bufferInfo, VkDescriptorImageInfo *imageInfo) {
+    VkWriteDescriptorSet writeDesciptorSet{};
+    writeDesciptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDesciptorSet.descriptorCount = 1;
+    writeDesciptorSet.descriptorType = descriptorType;
+    writeDesciptorSet.pImageInfo = imageInfo;
+    writeDesciptorSet.dstSet = descriptorSet;
+    writeDesciptorSet.dstBinding = dstBinding;
+    writeDesciptorSet.dstArrayElement = 0;
+    writeDesciptorSet.pBufferInfo = bufferInfo;
+    writeDesciptorSet.pTexelBufferView = nullptr;
+
+    return writeDesciptorSet;
 }
 
 #endif //VULKANBASE_VULKANHELPERS_H
