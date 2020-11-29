@@ -4,6 +4,8 @@ project(VulkanBase)
 set(CMAKE_CXX_STANDARD 14)
 find_package(Vulkan REQUIRED)
 ADD_SUBDIRECTORY(Dependencies/glfw-3.3.2)
+ADD_SUBDIRECTORY(Dependencies/glm)
+
 add_executable(VulkanBase src/main.cpp
         src/VulkanSetup.cpp
         src/VulkanSetup.h

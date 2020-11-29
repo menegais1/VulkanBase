@@ -433,4 +433,15 @@ void transitionImageInPipeline(VulkanHandles vulkanHandles, CommandBufferStructu
                                                   graphicsStructure.bufferAvaibleFence);
 }
 
+VkDescriptorSet vulkanAllocateDescriptorSet(VulkanHandles vulkanHandles, VkDescriptorPool descriptorPool, VkDescriptorSetLayout descriptorSetLayout){
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+    descriptorSetAllocateInfo.descriptorSetCount = 1;
+    descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayout;
+    VkDescriptorSet descriptorSet;
+    VK_ASSERT(vkAllocateDescriptorSets(vulkanHandles.device, &descriptorSetAllocateInfo, &descriptorSet));
+    return descriptorSet;
+}
+
 #endif //VULKANBASE_VULKANHELPERS_H
