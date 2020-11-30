@@ -375,7 +375,7 @@ buildTerrainPatches(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDevi
                                      {rightTop,    glm::vec2(1, 1)},
                                      {leftTop,     glm::vec2(0, 1)}};
             terrainPatch.indices = {0, 1, 2, 0, 2, 3};
-            terrainPatch.tessInfo.tessLevelInner = 1;
+            terrainPatch.tessInfo.tessLevelInner = 4;
             terrainPatch.tessInfo.tessLevelOuter = glm::vec3(1, 1, 1);
             terrainPatch.mvp.model = {glm::vec4(patchSize.x, 0, 0, patchPosition.x),
                                       glm::vec4(0, patchSize.y, 0, patchPosition.y),

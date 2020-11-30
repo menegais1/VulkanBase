@@ -1,5 +1,5 @@
 #version 450
-layout(location = 2) in vec2 i_texCoord;
+layout(location = 0) in vec2 i_texCoord;
 
 layout(location = 0) out vec4 fragColor;
 
