@@ -21,7 +21,6 @@ int const HEIGHT = 300;
 #define PI 3.14159265359
 struct InputVertex {
     glm::vec3 position;
-    glm::vec3 color;
     glm::vec2 texCoord;
 };
 
@@ -34,6 +33,21 @@ struct MVP {
 struct TessInfo {
     glm::vec3 tessLevelOuter;
     float tessLevelInner;
+};
+
+struct TerrainPatch {
+    TessInfo tessInfo;
+    std::vector<InputVertex> vertices;
+    std::vector<uint32_t> indices;
+    MVP mvp;
+    Buffer vertexBuffer;
+    Buffer indexBuffer;
+
+    Buffer tessInfoUniform;
+    VkDescriptorSet tessInfoDescriptorSet;
+
+    Buffer mvpUniform;
+    VkDescriptorSet mvpDescriptorSet;
 };
 
 struct Camera {
@@ -189,20 +203,20 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkVertexAttrPosition.offset = offsetof(struct InputVertex, position);
     vkVertexAttrPosition.format = VK_FORMAT_R32G32B32_SFLOAT;
     vkVertexAttrPosition.location = 0;
-
-    VkVertexInputAttributeDescription vkVertexAttrColor{};
-    vkVertexAttrColor.binding = 0;
-    vkVertexAttrColor.offset = offsetof(struct InputVertex, color);
-    vkVertexAttrColor.format = VK_FORMAT_R32G32B32_SFLOAT;
-    vkVertexAttrColor.location = 1;
+//
+//    VkVertexInputAttributeDescription vkVertexAttrColor{};
+//    vkVertexAttrColor.binding = 0;
+//    vkVertexAttrColor.offset = offsetof(struct InputVertex, color);
+//    vkVertexAttrColor.format = VK_FORMAT_R32G32B32_SFLOAT;
+//    vkVertexAttrColor.location = 1;
 
     VkVertexInputAttributeDescription vkVertexAttrTexCoord{};
     vkVertexAttrTexCoord.binding = 0;
     vkVertexAttrTexCoord.offset = offsetof(struct InputVertex, texCoord);
     vkVertexAttrTexCoord.format = VK_FORMAT_R32G32_SFLOAT;
-    vkVertexAttrTexCoord.location = 2;
+    vkVertexAttrTexCoord.location = 1;
 
-    std::vector<VkVertexInputAttributeDescription> vkDescriptions{vkVertexAttrPosition, vkVertexAttrColor,
+    std::vector<VkVertexInputAttributeDescription> vkDescriptions{vkVertexAttrPosition,
                                                                   vkVertexAttrTexCoord};
     VkPipelineVertexInputStateCreateInfo vkVertexInputStateCreateInfo{};
     vkVertexInputStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -322,6 +336,103 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     return vkPipeline;
 }
 
+void printMatrix(glm::mat4 mat) {
+    std::cout << std::endl;
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            std::cout << mat[j][i] << " ";
+        }
+        std::cout << std::endl;
+    }
+}
+
+std::vector<TerrainPatch>
+buildTerrainPatches(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, CommandBufferStructure transferStructure,
+                    int xAmount, int zAmount, glm::vec3 patchSize, glm::vec3 initialPosition, VkDescriptorSetLayout tessInfoLayout, VkDescriptorSetLayout mvpLayout, VkDescriptorPool descriptorPool) {
+    std::vector<TerrainPatch> patches;
+    std::vector<VkWriteDescriptorSet> descriptorWrites;
+
+    Buffer stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
+                                                   sizeof(InputVertex) * 4,
+                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    for (int x = 0; x < xAmount; x++) {
+        for (int z = 0; z < zAmount; z++) {
+            TerrainPatch terrainPatch{};
+            glm::vec3 patchSizeXZ = patchSize * glm::vec3(x, 1, z);
+            glm::vec3 patchPosition = initialPosition + patchSizeXZ;
+//            glm::vec3 leftBottom = patchPosition;
+//            glm::vec3 rightTop = patchPosition + patchSize;
+//            glm::vec3 rightBottom = patchPosition + glm::vec3(patchSize.x, 0, 0);
+//            glm::vec3 leftTop = patchPosition + glm::vec3(0, 0, patchSize.z);
+            glm::vec3 leftBottom = glm::vec3(-0.5, 0, -0.5);
+            glm::vec3 rightTop = glm::vec3(0.5, 0, 0.5);
+            glm::vec3 rightBottom = glm::vec3(0.5, 0, -0.5);
+            glm::vec3 leftTop = glm::vec3(-0.5, 0, 0.5);
+
+            terrainPatch.vertices = {{leftBottom,  glm::vec2(0, 0)},
+                                     {rightBottom, glm::vec2(1, 0)},
+                                     {rightTop,    glm::vec2(1, 1)},
+                                     {leftTop,     glm::vec2(0, 1)}};
+            terrainPatch.indices = {0, 1, 2, 0, 2, 3};
+            terrainPatch.tessInfo.tessLevelInner = 1;
+            terrainPatch.tessInfo.tessLevelOuter = glm::vec3(1, 1, 1);
+            terrainPatch.mvp.model = {glm::vec4(patchSize.x, 0, 0, patchPosition.x),
+                                      glm::vec4(0, patchSize.y, 0, patchPosition.y),
+                                      glm::vec4(0, 0, patchSize.z, patchPosition.z),
+                                      glm::vec4(0, 0, 0, 1)};
+            terrainPatch.mvp.model = glm::transpose(terrainPatch.mvp.model);
+//            terrainPatch.mvp.model = glm::identity<glm::mat4>();
+            printMatrix(terrainPatch.mvp.model);
+
+            vulkanMapMemoryWithFlush(vulkanHandles, stagingBuffer, terrainPatch.vertices.data());
+
+
+            terrainPatch.vertexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
+                                                                sizeof(InputVertex) * terrainPatch.vertices.size(),
+                                                                VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                                                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+            copyBufferHostDevice(vulkanHandles, physicalDeviceInfo, transferStructure, stagingBuffer, terrainPatch.vertexBuffer,
+                                 VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                                 physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
+
+            terrainPatch.indexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
+                                                               sizeof(uint32_t) * terrainPatch.indices.size(),
+                                                               VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+            vulkanMapMemoryWithFlush(vulkanHandles, terrainPatch.indexBuffer, terrainPatch.indices.data());
+
+            terrainPatch.mvpUniform = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, sizeof(MVP), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+            terrainPatch.mvpDescriptorSet = vulkanAllocateDescriptorSet(vulkanHandles, descriptorPool, mvpLayout);
+
+            VkDescriptorBufferInfo mvpBufferInfo{};
+            mvpBufferInfo.buffer = terrainPatch.mvpUniform.buffer;
+            mvpBufferInfo.range = terrainPatch.mvpUniform.size;
+            mvpBufferInfo.offset = 0;
+
+
+            descriptorWrites.push_back(vulkanGetWriteDescriptorSet(vulkanHandles, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, terrainPatch.mvpDescriptorSet, 0, &mvpBufferInfo, nullptr));
+
+            terrainPatch.tessInfoUniform = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, sizeof(TessInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+            terrainPatch.tessInfoDescriptorSet = vulkanAllocateDescriptorSet(vulkanHandles, descriptorPool, tessInfoLayout);
+
+            VkDescriptorBufferInfo tessInfoBufferInfo{};
+            tessInfoBufferInfo.buffer = terrainPatch.tessInfoUniform.buffer;
+            tessInfoBufferInfo.range = terrainPatch.tessInfoUniform.size;
+            tessInfoBufferInfo.offset = 0;
+            descriptorWrites.push_back(vulkanGetWriteDescriptorSet(vulkanHandles, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                                                   terrainPatch.tessInfoDescriptorSet, 0, &tessInfoBufferInfo, nullptr));
+            vkUpdateDescriptorSets(vulkanHandles.device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+            descriptorWrites.clear();
+            patches.push_back(terrainPatch);
+        }
+    }
+
+    return patches;
+}
 
 int main() {
     glfwInit();
@@ -370,7 +481,8 @@ int main() {
                                                                                    {
                                                                                            vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT),
                                                                                            vulkanCreateDescriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)});
-    VkDescriptorSetLayout vkDescriptorSetLayout1 = vulkanCreateDescriptorSetLayout(vulkanHandles, {vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT)});
+    VkDescriptorSetLayout vkDescriptorSetLayout1 = vulkanCreateDescriptorSetLayout(vulkanHandles,
+                                                                                   {vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT)});
     VkDescriptorSetLayout vkDescriptorSetLayout2 = vulkanCreateDescriptorSetLayout(vulkanHandles,
                                                                                    {vulkanCreateDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT)});
 
@@ -386,7 +498,7 @@ int main() {
     VK_ASSERT(vkCreatePipelineLayout(vulkanHandles.device, &vkPipelineLayoutCreateInfo, nullptr, &vkPipelineLayout));
 
     vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo,
-                                                  vkPipelineLayout, vertModule, fragModule, tessModule,tessEvalModule);
+                                                  vkPipelineLayout, vertModule, fragModule, tessModule, tessEvalModule);
 
     vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex, 0,
                      &graphicsQueue);
@@ -414,35 +526,6 @@ int main() {
     VkClearValue vkClearValue = {1.0, 0.0, 0.0, 1.0};
     VkFence vkFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
 
-    std::vector<InputVertex> vertexBufferData{
-            {glm::vec3(0, 0, 0),     glm::vec3(1, 0, 0), glm::vec2(0, 1)},
-            {glm::vec3(0.5, 0, 0),   glm::vec3(1, 1, 0), glm::vec2(1, 1)},
-            {glm::vec3(0.5, 0.5, 0), glm::vec3(1, 0, 1), glm::vec2(1, 0)},
-            {glm::vec3(0, 0.5, 0),   glm::vec3(1, 0, 1), glm::vec2(0, 0)}
-    };
-
-    std::vector<uint32_t> indexData = {
-            0, 1, 2, 0, 2, 3
-    };
-
-    Buffer stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
-                                                   sizeof(InputVertex) * vertexBufferData.size(),
-                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-
-    vulkanMapMemoryWithFlush(vulkanHandles, stagingBuffer, vertexBufferData.data());
-
-
-    Buffer vertexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
-                                                  sizeof(InputVertex) * vertexBufferData.size(),
-                                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    copyBufferHostDevice(vulkanHandles, physicalDeviceInfo, transferStructure, stagingBuffer, vertexBuffer,
-                         VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-                         physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
-
     Bitmap *image1 = new Bitmap(FileLoader::getPath("Resources/dog.bmp"));
     Texture2D texture1 = createTexture2D(vulkanHandles, physicalDeviceInfo, image1->originalBitmapArray,
                                          {(uint32_t) image1->width, (uint32_t) image1->height},
@@ -451,8 +534,8 @@ int main() {
                                          VK_IMAGE_ASPECT_COLOR_BIT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
                                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, image1->width * image1->height * 4 * 4,
-                                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    Buffer stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, image1->width * image1->height * 4 * 4,
+                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
     vulkanMapMemoryWithFlush(vulkanHandles, stagingBuffer, image1->originalBitmapArray);
 
@@ -461,11 +544,7 @@ int main() {
                               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
 
-    Buffer mvpBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, sizeof(MVP), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-    Buffer tessInfoBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, sizeof(TessInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
     VkDescriptorSet textureDescriptorSet = vulkanAllocateDescriptorSet(vulkanHandles, descriptorPool, vkDescriptorSetLayout0);
-    VkDescriptorSet mvpDescriptorSet = vulkanAllocateDescriptorSet(vulkanHandles, descriptorPool, vkDescriptorSetLayout1);
-    VkDescriptorSet tessInfoDescriptorSet = vulkanAllocateDescriptorSet(vulkanHandles, descriptorPool, vkDescriptorSetLayout2);
 
     VkDescriptorImageInfo vkDescriptorImageInfo{};
     vkDescriptorImageInfo.imageView = texture1.imageView;
@@ -474,39 +553,19 @@ int main() {
 
     VkWriteDescriptorSet vkWriteDescriptorSet = vulkanGetWriteDescriptorSet(vulkanHandles, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, textureDescriptorSet, 0, nullptr, &vkDescriptorImageInfo);
 
-    VkDescriptorBufferInfo mvpBufferInfo{};
-    mvpBufferInfo.buffer = mvpBuffer.buffer;
-    mvpBufferInfo.range = mvpBuffer.size;
-    mvpBufferInfo.offset = 0;
-
-    VkWriteDescriptorSet mvpBufferDescriptorWrite = vulkanGetWriteDescriptorSet(vulkanHandles, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, mvpDescriptorSet, 0, &mvpBufferInfo, nullptr);
-
-    VkDescriptorBufferInfo tessInfoBufferInfo{};
-    tessInfoBufferInfo.buffer = tessInfoBuffer.buffer;
-    tessInfoBufferInfo.range = tessInfoBuffer.size;
-    tessInfoBufferInfo.offset = 0;
-    VkWriteDescriptorSet tessInfoBufferDescriptorWrite = vulkanGetWriteDescriptorSet(vulkanHandles, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, tessInfoDescriptorSet, 0, &tessInfoBufferInfo, nullptr);
-
-    std::vector<VkWriteDescriptorSet> descriptorWriteInfo = {vkWriteDescriptorSet, mvpBufferDescriptorWrite, tessInfoBufferDescriptorWrite};
+    std::vector<VkWriteDescriptorSet> descriptorWriteInfo = {vkWriteDescriptorSet};
 
     vkUpdateDescriptorSets(vulkanHandles.device, descriptorWriteInfo.size(), descriptorWriteInfo.data(), 0, nullptr);
-    Buffer indexBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo,
-                                                 sizeof(uint32_t) * indexData.size(),
-                                                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-
-    vulkanMapMemoryWithFlush(vulkanHandles, indexBuffer, indexData.data());
-
 
     MVP mvp{};
     mvp.model = glm::mat4(1);
     mvp.projetion = glm::perspective(45.0, 1.0, 0.001, 1000.0);
-
-    TessInfo tessInfo{};
-    tessInfo.tessLevelInner = 2;
-    tessInfo.tessLevelOuter = glm::vec3(1, 1, 1);
-
     camera.positionCameraCenter();
+
+
+    std::vector<TerrainPatch> terrainPatches = buildTerrainPatches(vulkanHandles, physicalDeviceInfo, transferStructure, 2, 2,
+                                                                   glm::vec3(1, 0, 1), glm::vec3(1, 1, 1), vkDescriptorSetLayout2, vkDescriptorSetLayout1, descriptorPool);
+
 
     int renderFramesAmount = 2;
     std::vector<RenderFrame> renderFrames(renderFramesAmount);
@@ -546,31 +605,39 @@ int main() {
 
 
             mvp.view = glm::lookAt(camera.eye, camera.center, camera.up);
-            vulkanMapMemoryWithFlush(vulkanHandles, mvpBuffer, &mvp);
 
-            vulkanMapMemoryWithFlush(vulkanHandles, tessInfoBuffer, &tessInfo);
-
+            for (int j = 0; j < terrainPatches.size(); ++j) {
+                vulkanMapMemoryWithFlush(vulkanHandles, terrainPatches[j].tessInfoUniform, &terrainPatches[j].tessInfo);
+            }
 
             CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, renderFrame.commandBuffer, 0);
             {
                 vkCmdBeginRenderPass(renderFrame.commandBuffer, &vkRenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
                 vkCmdBindPipeline(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanHandles.pipeline);
                 VkDeviceSize offset = 0;
-                vkCmdBindVertexBuffers(renderFrame.commandBuffer, 0, 1, &vertexBuffer.buffer, &offset);
-                vkCmdBindIndexBuffer(renderFrame.commandBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
                 vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 0,
                                         1,
                                         &textureDescriptorSet, 0,
                                         nullptr);
-                vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 1,
-                                        1,
-                                        &mvpDescriptorSet, 0,
-                                        nullptr);
-                vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 2,
-                                        1,
-                                        &tessInfoDescriptorSet, 0,
-                                        nullptr);
-                vkCmdDrawIndexed(renderFrame.commandBuffer, indexData.size(), 1, 0, 0, 1);
+
+                for (int j = 0; j < terrainPatches.size(); ++j) {
+                    terrainPatches[j].mvp.view = mvp.view;
+                    terrainPatches[j].mvp.projetion = mvp.projetion;
+                    vulkanMapMemoryWithFlush(vulkanHandles, terrainPatches[j].mvpUniform, &terrainPatches[j].mvp);
+
+                    vkCmdBindVertexBuffers(renderFrame.commandBuffer, 0, 1, &terrainPatches[j].vertexBuffer.buffer, &offset);
+                    vkCmdBindIndexBuffer(renderFrame.commandBuffer, terrainPatches[j].indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 2,
+                                            1,
+                                            &terrainPatches[j].tessInfoDescriptorSet, 0,
+                                            nullptr);
+                    vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 1,
+                                            1,
+                                            &terrainPatches[j].mvpDescriptorSet, 0,
+                                            nullptr);
+                    vkCmdDrawIndexed(renderFrame.commandBuffer, terrainPatches[j].indices.size(), 1, 0, 0, 1);
+                }
                 vkCmdEndRenderPass(renderFrame.commandBuffer);
             }
             VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
