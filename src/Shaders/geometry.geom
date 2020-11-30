@@ -23,19 +23,20 @@ void main(void)
 
     vec3 dir = cross(b - a, c - a);
     outNormal = normalize(dir);
-
-    gl_Position = ubo.projection * ubo.model * vec4(a, 1.0);
-    outPos = (ubo.model * vec4(a, 1.0)).xyz;
+    gl_Position = mvp.projection * mvp.view* mvp.model * vec4(a, 1.0);
+    outPos = (mvp.model * vec4(a, 1.0)).xyz;
     outUV = inUV[0];
     EmitVertex();
 
-    gl_Position = ubo.projection * ubo.model * vec4(b, 1.0);
-    outPos = (ubo.model * vec4(b, 1.0)).xyz;
+    outNormal = normalize(dir);
+    gl_Position = mvp.projection * mvp.view* mvp.model * vec4(b, 1.0);
+    outPos = (mvp.model * vec4(b, 1.0)).xyz;
     outUV = inUV[1];
     EmitVertex();
 
-    gl_Position = ubo.projection * ubo.model * vec4(c, 1.0);
-    outPos = (ubo.model * vec4(c, 1.0)).xyz;
+    outNormal = normalize(dir);
+    gl_Position = mvp.projection * mvp.view* mvp.model * vec4(c, 1.0);
+    outPos = (mvp.model * vec4(c, 1.0)).xyz;
     outUV = inUV[2];
     EmitVertex();
 
