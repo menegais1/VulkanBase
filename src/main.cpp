@@ -1,6 +1,7 @@
 #include <iostream>
 
 #define GLFW_INCLUDE_VULKAN
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include <GLFW/glfw3.h>
 #include <vector>
@@ -76,6 +77,7 @@ struct LightInformation {
 glm::vec2 lastMousePosition;
 float mouseSensitivity = 0.5;
 float globalInnerTess = 1;
+float globalOuterTess = 1;
 
 void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods) {
     float moveSpeed = camera.speed * 0.01;
@@ -113,8 +115,10 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods) {
 
     if (key == GLFW_KEY_J) {
         globalInnerTess -= 1;
+        globalOuterTess -= 1;
     } else if (key == GLFW_KEY_K) {
         globalInnerTess += 1;
+        globalOuterTess += 1;
     }
 }
 
@@ -127,7 +131,7 @@ void mouseButton(GLFWwindow *window, int button, int action, int modifier) {
 }
 
 void mouseMovement(GLFWwindow *window, double xpos, double ypos) {
-    ypos  = HEIGHT - ypos;
+    ypos = HEIGHT - ypos;
     if (camera.isDragging) {
 
         float xDelta = (xpos - lastMousePosition.x);
@@ -152,26 +156,43 @@ void mouseMovement(GLFWwindow *window, double xpos, double ypos) {
 
 VkRenderPass
 vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo) {
-    VkAttachmentDescription vkAttachmentDescription{};
-    vkAttachmentDescription.format = presentationEngineInfo.format.format;
-    vkAttachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    vkAttachmentDescription.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    vkAttachmentDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    vkAttachmentDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    vkAttachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    vkAttachmentDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    vkAttachmentDescription.samples = VK_SAMPLE_COUNT_1_BIT;
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = presentationEngineInfo.format.format;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
 
-    VkAttachmentReference vkAttachmentReference{};
-    vkAttachmentReference.attachment = 0;
-    vkAttachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = VK_FORMAT_D32_SFLOAT;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
+
+    VkAttachmentReference colorAttachmentReference{};
+    colorAttachmentReference.attachment = 0;
+    colorAttachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentReference{};
+    depthAttachmentReference.attachment = 1;
+    depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
 
     VkSubpassDescription vkSubpassDescription{};
     vkSubpassDescription.colorAttachmentCount = 1;
-    vkSubpassDescription.pColorAttachments = &vkAttachmentReference;
+    vkSubpassDescription.pColorAttachments = &colorAttachmentReference;
     vkSubpassDescription.inputAttachmentCount = 0;
     vkSubpassDescription.pInputAttachments = nullptr;
-    vkSubpassDescription.pDepthStencilAttachment = nullptr;
+    vkSubpassDescription.pDepthStencilAttachment = &depthAttachmentReference;
     vkSubpassDescription.pPreserveAttachments = nullptr;
     vkSubpassDescription.pResolveAttachments = nullptr;
     vkSubpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -179,18 +200,18 @@ vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngi
     VkSubpassDependency vkSubpassDependency{};
     vkSubpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     vkSubpassDependency.dstSubpass = 0;
-    vkSubpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    vkSubpassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    vkSubpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    vkSubpassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     vkSubpassDependency.srcAccessMask = 0;
-    vkSubpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    vkSubpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     vkSubpassDependency.dependencyFlags = 0;
 
     VkRenderPassCreateInfo vkRenderPassCreateInfo{};
     vkRenderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     vkRenderPassCreateInfo.subpassCount = 1;
     vkRenderPassCreateInfo.pSubpasses = &vkSubpassDescription;
-    vkRenderPassCreateInfo.attachmentCount = 1;
-    vkRenderPassCreateInfo.pAttachments = &vkAttachmentDescription;
+    vkRenderPassCreateInfo.attachmentCount = attachments.size();
+    vkRenderPassCreateInfo.pAttachments = attachments.data();
     vkRenderPassCreateInfo.dependencyCount = 1;
     vkRenderPassCreateInfo.pDependencies = &vkSubpassDependency;
     VkRenderPass vkRenderPass;
@@ -251,7 +272,7 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
 
     VkViewport vkViewport{};
     vkViewport.width = presentationEngineInfo.extents.width;
-    vkViewport.height = - float(presentationEngineInfo.extents.height);
+    vkViewport.height = -float(presentationEngineInfo.extents.height);
     vkViewport.x = 0;
     vkViewport.y = presentationEngineInfo.extents.height;
     vkViewport.minDepth = 0.0;
@@ -277,7 +298,7 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkPipelineRasterizationStateCreateInfo.depthBiasConstantFactor = 0;
     vkPipelineRasterizationStateCreateInfo.depthBiasSlopeFactor = 0;
     vkPipelineRasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    vkPipelineRasterizationStateCreateInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+    vkPipelineRasterizationStateCreateInfo.cullMode = VK_CULL_MODE_NONE;
     vkPipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
 //    vkPipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_LINE;
     vkPipelineRasterizationStateCreateInfo.lineWidth = 1.0;
@@ -302,6 +323,9 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
 
     VkPipelineDepthStencilStateCreateInfo vkPipelineDepthStencilStateCreateInfo{};
     vkPipelineDepthStencilStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    vkPipelineDepthStencilStateCreateInfo.depthTestEnable = VK_TRUE;
+    vkPipelineDepthStencilStateCreateInfo.depthWriteEnable = VK_TRUE;
+    vkPipelineDepthStencilStateCreateInfo.depthCompareOp = VK_COMPARE_OP_LESS;
 
 
     VkPipelineShaderStageCreateInfo vkVertexShaderStageCreateInfo{};
@@ -349,6 +373,7 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkGraphicsPipelineCreateInfo.pViewportState = &vkPipelineViewportStateCreateInfo;
     vkGraphicsPipelineCreateInfo.pRasterizationState = &vkPipelineRasterizationStateCreateInfo;
     vkGraphicsPipelineCreateInfo.pTessellationState = &vkPipelineTessellationStateCreateInfo;
+    vkGraphicsPipelineCreateInfo.pDepthStencilState = &vkPipelineDepthStencilStateCreateInfo;
     vkGraphicsPipelineCreateInfo.pDynamicState = nullptr;
     vkGraphicsPipelineCreateInfo.layout = vkPipelineLayout;
 
@@ -390,10 +415,10 @@ buildTerrainPatches(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDevi
             glm::vec3 rightBottom = glm::vec3(0.5, 0, -0.5);
             glm::vec3 leftTop = glm::vec3(-0.5, 0, 0.5);
 
-            terrainPatch.vertices = {{leftBottom,  glm::vec2(uvStep.x * (x + 0), uvStep.z * (z + 0))},
-                                     {rightBottom, glm::vec2(uvStep.x * (x + 1), uvStep.z * (z + 0))},
-                                     {rightTop,    glm::vec2(uvStep.x * (x + 1), uvStep.z * (z + 1))},
-                                     {leftTop,     glm::vec2(uvStep.x * (x + 0), uvStep.z * (z + 1))}};
+            terrainPatch.vertices = {{leftBottom,  glm::vec2(float(uvStep.x * (x + 0)), float(uvStep.z * (z + 0)))},
+                                     {rightBottom, glm::vec2(float(uvStep.x * (x + 1)), float(uvStep.z * (z + 0)))},
+                                     {rightTop,    glm::vec2(float(uvStep.x * (x + 1)), float(uvStep.z * (z + 1)))},
+                                     {leftTop,     glm::vec2(float(uvStep.x * (x + 0)), float(uvStep.z * (z + 1)))}};
             terrainPatch.indices = {0, 1, 2, 0, 2, 3};
             terrainPatch.tessInfo.tessLevelInner = 4;
             terrainPatch.tessInfo.tessLevelOuter = glm::vec3(1, 1, 1);
@@ -479,6 +504,12 @@ int main() {
     swapchainReferences.images = vulkanGetSwapchainImages(vulkanHandles, presentationEngineInfo);
     swapchainReferences.imageViews = vulkanCreateSwapchainImageViews(vulkanHandles, presentationEngineInfo,
                                                                      swapchainReferences.images);
+
+    VkImage depthMap = vulkanCreateImage2D(vulkanHandles, {WIDTH, HEIGHT}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    VkMemoryRequirements depthMapRequirement = vulkanGetImageMemoryRequirements(vulkanHandles, depthMap);
+    VkDeviceMemory depthMapMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo, depthMapRequirement, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VK_ASSERT(vkBindImageMemory(vulkanHandles.device, depthMap, depthMapMemory, 0));
+    VkImageView depthMapImageView = vulkanCreateImageView2D(vulkanHandles, depthMap, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
     vulkanHandles.renderPass = vulkanCreateRenderPass(vulkanHandles, presentationEngineInfo);
 
     auto vert = vulkanLoadShader("../src/Shaders/vert.spv");
@@ -545,7 +576,8 @@ int main() {
     VkRect2D viewRect{};
     viewRect.extent = presentationEngineInfo.extents;
     viewRect.offset = {0, 0};
-    VkClearValue vkClearValue = {1.0, 0.0, 0.0, 1.0};
+    VkClearValue colorClearValue = {1.0, 0.0, 0.0, 1.0};
+    VkClearValue depthClearValue = {1.0, 0.0};
     VkFence vkFence = vulkanCreateFence(vulkanHandles, VK_FENCE_CREATE_SIGNALED_BIT);
 
     Bitmap *image1 = new Bitmap(FileLoader::getPath("Resources/heightmap.bmp"));
@@ -605,7 +637,7 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         float flash = std::abs(std::sin(frameNumber / 500.f));
-        vkClearValue.color = {{0.0f, 0.0f, flash, 1.0f}};
+        colorClearValue.color = {{0.0f, 0.0f, flash, 1.0f}};
 
         for (int i = 0; i < renderFramesAmount; ++i) {
             RenderFrame &renderFrame = renderFrames[i];
@@ -622,15 +654,16 @@ int main() {
             renderFrame.frameBuffer = vulkanCreateFrameBuffer(vulkanHandles,
                                                               presentationEngineInfo.extents.width,
                                                               presentationEngineInfo.extents.height,
-                                                              swapchainReferences.imageViews[imageIndex]);
+                                                              {swapchainReferences.imageViews[imageIndex], depthMapImageView});
 
+            std::vector<VkClearValue> clearValues = {colorClearValue, depthClearValue};
             VkRenderPassBeginInfo vkRenderPassBeginInfo{};
             vkRenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             vkRenderPassBeginInfo.renderPass = vulkanHandles.renderPass;
             vkRenderPassBeginInfo.framebuffer = renderFrame.frameBuffer;
             vkRenderPassBeginInfo.renderArea = viewRect;
-            vkRenderPassBeginInfo.clearValueCount = 1;
-            vkRenderPassBeginInfo.pClearValues = &vkClearValue;
+            vkRenderPassBeginInfo.clearValueCount = clearValues.size();
+            vkRenderPassBeginInfo.pClearValues = clearValues.data();
 
 
             mvp.view = glm::lookAt(camera.eye, camera.center, camera.up);
@@ -657,6 +690,7 @@ int main() {
                     terrainPatches[j].mvp.view = mvp.view;
                     terrainPatches[j].mvp.projetion = mvp.projetion;
                     terrainPatches[j].tessInfo.tessLevelInner = globalInnerTess;
+                    terrainPatches[j].tessInfo.tessLevelOuter = glm::vec3(globalOuterTess);
                     vulkanMapMemoryWithFlush(vulkanHandles, terrainPatches[j].mvpUniform, &terrainPatches[j].mvp);
                     vulkanMapMemoryWithFlush(vulkanHandles, terrainPatches[j].tessInfoUniform, &terrainPatches[j].tessInfo);
 

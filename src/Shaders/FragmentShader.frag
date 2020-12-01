@@ -16,6 +16,6 @@ layout(set = 0, binding = 1) uniform LightInformation{
 
 void main(){
     float diffuse = dot(normalize(inNormal),normalize(lightInformation.position - inPos));
-    if(diffuse < 0) diffuse = 0;
-    fragColor = vec4(0.4,0,0,1) * diffuse;
+    if(diffuse < 0) diffuse = 0.1;
+    fragColor = vec4(1,1,1,1) * diffuse;
 }
