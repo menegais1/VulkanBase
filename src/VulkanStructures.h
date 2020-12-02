@@ -59,8 +59,6 @@ struct CommandBufferStructure {
 struct VulkanHandles {
     VkInstance instance;
     VkDevice device;
-    VkPipeline pipeline;
-    VkRenderPass renderPass;
     VkSwapchainKHR swapchain;
     VkSurfaceKHR surface;
     VkPhysicalDevice physicalDevice;

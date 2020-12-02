@@ -17,8 +17,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-int const WIDTH = 300;
-int const HEIGHT = 300;
+int const WIDTH = 500;
+int const HEIGHT = 500;
 #define PI 3.14159265359
 struct InputVertex {
     glm::vec3 position;
@@ -64,7 +64,6 @@ struct Camera {
         direction.x = cos(angle.y * PI / 180.0) * cos(angle.x * PI / 180.0);
         direction.y = sin(angle.x * PI / 180.0);
         direction.z = sin(angle.y * PI / 180.0) * cos(angle.x * PI / 180.0);
-        std::cout << direction.x << " " << direction.y << " " << direction.z << std::endl;
         center = eye + glm::normalize(direction);
     }
 } camera;
@@ -78,7 +77,13 @@ glm::vec2 lastMousePosition;
 float mouseSensitivity = 0.5;
 float globalInnerTess = 1;
 float globalOuterTess = 1;
-
+int activePatch = 0;
+VkPipeline activePipeline;
+VkPipeline shadedPipeline;
+VkPipeline wirePipeline;
+std::vector<TerrainPatch> terrainPatches;
+float maxTesselationLevel = -1;
+float angle = 0;
 void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods) {
     float moveSpeed = camera.speed * 0.01;
 
@@ -113,13 +118,30 @@ void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods) {
         camera.up = glm::vec3(0, 1, 0);
     }
 
-    if (key == GLFW_KEY_J) {
-        globalInnerTess -= 1;
-        globalOuterTess -= 1;
-    } else if (key == GLFW_KEY_K) {
-        globalInnerTess += 1;
-        globalOuterTess += 1;
+    if (key == GLFW_KEY_LEFT) {
+        terrainPatches[activePatch].tessInfo.tessLevelInner -= 1;
+        if (terrainPatches[activePatch].tessInfo.tessLevelInner < 1) terrainPatches[activePatch].tessInfo.tessLevelInner = 1;
+    } else if (key == GLFW_KEY_RIGHT) {
+        terrainPatches[activePatch].tessInfo.tessLevelInner += 1;
+        if (terrainPatches[activePatch].tessInfo.tessLevelInner > maxTesselationLevel) terrainPatches[activePatch].tessInfo.tessLevelInner = maxTesselationLevel;
     }
+
+    if (key == GLFW_KEY_DOWN) {
+        globalOuterTess -= 1;
+        if (globalOuterTess < 1) globalOuterTess = 1;
+    } else if (key == GLFW_KEY_UP) {
+        globalOuterTess += 1;
+        if (globalOuterTess > maxTesselationLevel) globalOuterTess = maxTesselationLevel;
+    }
+
+    if (key == GLFW_KEY_O) {
+        activePipeline = wirePipeline;
+    } else if (key == GLFW_KEY_P) {
+        activePipeline = shadedPipeline;
+    }
+
+    if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9)
+        activePatch = key - GLFW_KEY_1;
 }
 
 void mouseButton(GLFWwindow *window, int button, int action, int modifier) {
@@ -219,7 +241,7 @@ vulkanCreateRenderPass(const VulkanHandles vulkanHandles, const PresentationEngi
     return vkRenderPass;
 }
 
-VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo, VkPipelineLayout vkPipelineLayout,
+VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const PresentationEngineInfo presentationEngineInfo, VkPipelineLayout vkPipelineLayout, VkRenderPass renderPass, VkPolygonMode polygonMode,
                                 const VkShaderModule vertexShaderModule,
                                 const VkShaderModule fragmentShaderModule, const VkShaderModule tesselationControlShaderModule,
                                 const VkShaderModule tesselationEvaluationShaderModule, const VkShaderModule geometryShaderModule) {
@@ -237,12 +259,6 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkVertexAttrPosition.offset = offsetof(struct InputVertex, position);
     vkVertexAttrPosition.format = VK_FORMAT_R32G32B32_SFLOAT;
     vkVertexAttrPosition.location = 0;
-//
-//    VkVertexInputAttributeDescription vkVertexAttrColor{};
-//    vkVertexAttrColor.binding = 0;
-//    vkVertexAttrColor.offset = offsetof(struct InputVertex, color);
-//    vkVertexAttrColor.format = VK_FORMAT_R32G32B32_SFLOAT;
-//    vkVertexAttrColor.location = 1;
 
     VkVertexInputAttributeDescription vkVertexAttrTexCoord{};
     vkVertexAttrTexCoord.binding = 0;
@@ -263,7 +279,6 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     VkPipelineInputAssemblyStateCreateInfo vkPipelineInputAssemblyStateCreateInfo{};
     vkPipelineInputAssemblyStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     vkPipelineInputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
-//    vkPipelineInputAssemblyStateCreateInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     vkPipelineInputAssemblyStateCreateInfo.primitiveRestartEnable = VK_FALSE;
 
     VkPipelineTessellationStateCreateInfo vkPipelineTessellationStateCreateInfo{};
@@ -299,8 +314,7 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     vkPipelineRasterizationStateCreateInfo.depthBiasSlopeFactor = 0;
     vkPipelineRasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     vkPipelineRasterizationStateCreateInfo.cullMode = VK_CULL_MODE_NONE;
-    vkPipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
-//    vkPipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_LINE;
+    vkPipelineRasterizationStateCreateInfo.polygonMode = polygonMode;
     vkPipelineRasterizationStateCreateInfo.lineWidth = 1.0;
 
     VkPipelineMultisampleStateCreateInfo vkPipelineMultisampleStateCreateInfo{};
@@ -362,7 +376,7 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
                                               vkTesselationControlShaderStageCreateInfo, vkTesselationEvaluationShaderStageCreateInfo, vkGeometryShaderStageCreateInfo};
     VkGraphicsPipelineCreateInfo vkGraphicsPipelineCreateInfo{};
     vkGraphicsPipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    vkGraphicsPipelineCreateInfo.renderPass = vulkanHandles.renderPass;
+    vkGraphicsPipelineCreateInfo.renderPass = renderPass;
     vkGraphicsPipelineCreateInfo.subpass = 0;
     vkGraphicsPipelineCreateInfo.stageCount = 5;
     vkGraphicsPipelineCreateInfo.pStages = stages;
@@ -383,14 +397,9 @@ VkPipeline vulkanCreatePipeline(const VulkanHandles vulkanHandles, const Present
     return vkPipeline;
 }
 
-void printMatrix(glm::mat4 mat) {
-    std::cout << std::endl;
-    for (int i = 0; i < 4; ++i) {
-        for (int j = 0; j < 4; ++j) {
-            std::cout << mat[j][i] << " ";
-        }
-        std::cout << std::endl;
-    }
+float round(float var) {
+    float value = (int) (var * 100 + .5);
+    return (float) value / 100;
 }
 
 std::vector<TerrainPatch>
@@ -415,10 +424,16 @@ buildTerrainPatches(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDevi
             glm::vec3 rightBottom = glm::vec3(0.5, 0, -0.5);
             glm::vec3 leftTop = glm::vec3(-0.5, 0, 0.5);
 
-            terrainPatch.vertices = {{leftBottom,  glm::vec2(float(uvStep.x * (x + 0)), float(uvStep.z * (z + 0)))},
-                                     {rightBottom, glm::vec2(float(uvStep.x * (x + 1)), float(uvStep.z * (z + 0)))},
-                                     {rightTop,    glm::vec2(float(uvStep.x * (x + 1)), float(uvStep.z * (z + 1)))},
-                                     {leftTop,     glm::vec2(float(uvStep.x * (x + 0)), float(uvStep.z * (z + 1)))}};
+            terrainPatch.vertices = {{leftBottom,  glm::vec2(round(uvStep.x * (x + 0)), round(uvStep.z * (z + 0)))},
+                                     {rightBottom, glm::vec2(round(uvStep.x * (x + 1)), round(uvStep.z * (z + 0)))},
+                                     {rightTop,    glm::vec2(round(uvStep.x * (x + 1)), round(uvStep.z * (z + 1)))},
+                                     {leftTop,     glm::vec2(round(uvStep.x * (x + 0)), round(uvStep.z * (z + 1)))}};
+            std::cout << "PATCH{" << std::endl;
+            for (int i = 0; i < terrainPatch.vertices.size(); ++i) {
+                std::cout << "UV: " << terrainPatch.vertices[i].texCoord.x << " " << terrainPatch.vertices[i].texCoord.y << std::endl;
+            }
+            std::cout << "}" << std::endl;
+
             terrainPatch.indices = {0, 1, 2, 0, 2, 3};
             terrainPatch.tessInfo.tessLevelInner = 4;
             terrainPatch.tessInfo.tessLevelOuter = glm::vec3(1, 1, 1);
@@ -427,7 +442,6 @@ buildTerrainPatches(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDevi
                                       glm::vec4(0, 0, patchSize.z, patchPosition.z),
                                       glm::vec4(0, 0, 0, 1)};
             terrainPatch.mvp.model = glm::transpose(terrainPatch.mvp.model);
-            printMatrix(terrainPatch.mvp.model);
 
             vulkanMapMemoryWithFlush(vulkanHandles, stagingBuffer, terrainPatch.vertices.data());
 
@@ -496,7 +510,7 @@ int main() {
 
     VulkanSetup vulkanSetup;
     vulkanSetup.vulkanSetup(window, vulkanHandles, physicalDeviceInfo, presentationEngineInfo);
-
+    maxTesselationLevel = physicalDeviceInfo.physicalDeviceProperties.limits.maxTessellationGenerationLevel;
     vkGraphicsPool = CommandBufferUtils::vulkanCreateCommandPool(vulkanHandles,
                                                                  physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex);
     vkTransferPool = CommandBufferUtils::vulkanCreateCommandPool(vulkanHandles,
@@ -510,7 +524,7 @@ int main() {
     VkDeviceMemory depthMapMemory = vulkanAllocateDeviceMemory(vulkanHandles, physicalDeviceInfo, depthMapRequirement, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VK_ASSERT(vkBindImageMemory(vulkanHandles.device, depthMap, depthMapMemory, 0));
     VkImageView depthMapImageView = vulkanCreateImageView2D(vulkanHandles, depthMap, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
-    vulkanHandles.renderPass = vulkanCreateRenderPass(vulkanHandles, presentationEngineInfo);
+    VkRenderPass renderPass = vulkanCreateRenderPass(vulkanHandles, presentationEngineInfo);
 
     auto vert = vulkanLoadShader("../src/Shaders/vert.spv");
     auto frag = vulkanLoadShader("../src/Shaders/frag.spv");
@@ -524,9 +538,9 @@ int main() {
     auto geometryModule = vulkanCreateShaderModule(vulkanHandles, geometry);
 
     VkDescriptorPool descriptorPool = vulkanAllocateDescriptorPool(vulkanHandles,
-                                                                   {vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16),
-                                                                    vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16)},
-                                                                   16);
+                                                                   {vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 24),
+                                                                    vulkanAllocateDescriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 24)},
+                                                                   24);
 
 
     VkDescriptorSetLayout vkDescriptorSetLayout0 = vulkanCreateDescriptorSetLayout(vulkanHandles,
@@ -550,9 +564,12 @@ int main() {
     VkPipelineLayout vkPipelineLayout;
     VK_ASSERT(vkCreatePipelineLayout(vulkanHandles.device, &vkPipelineLayoutCreateInfo, nullptr, &vkPipelineLayout));
 
-    vulkanHandles.pipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo,
-                                                  vkPipelineLayout, vertModule, fragModule, tessModule, tessEvalModule, geometryModule);
+    shadedPipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo,
+                                          vkPipelineLayout, renderPass, VK_POLYGON_MODE_FILL, vertModule, fragModule, tessModule, tessEvalModule, geometryModule);
 
+    wirePipeline = vulkanCreatePipeline(vulkanHandles, presentationEngineInfo,
+                                        vkPipelineLayout, renderPass, VK_POLYGON_MODE_LINE, vertModule, fragModule, tessModule, tessEvalModule, geometryModule);
+    activePipeline = shadedPipeline;
     vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.graphicsFamilyIndex, 0,
                      &graphicsQueue);
     vkGetDeviceQueue(vulkanHandles.device, physicalDeviceInfo.queueFamilyInfo.presentationFamilyIndex, 0,
@@ -624,8 +641,8 @@ int main() {
     camera.positionCameraCenter();
 
 
-    std::vector<TerrainPatch> terrainPatches = buildTerrainPatches(vulkanHandles, physicalDeviceInfo, transferStructure, 2, 2,
-                                                                   glm::vec3(1, 1, 1), glm::vec3(1, 1, 1), vkDescriptorSetLayout2, vkDescriptorSetLayout1, descriptorPool);
+    terrainPatches = buildTerrainPatches(vulkanHandles, physicalDeviceInfo, transferStructure, 2, 2,
+                                         glm::vec3(2, 2, 2), glm::vec3(1, -3, 1), vkDescriptorSetLayout2, vkDescriptorSetLayout1, descriptorPool);
 
 
     int renderFramesAmount = 2;
@@ -653,13 +670,13 @@ int main() {
             }
             renderFrame.frameBuffer = vulkanCreateFrameBuffer(vulkanHandles,
                                                               presentationEngineInfo.extents.width,
-                                                              presentationEngineInfo.extents.height,
+                                                              presentationEngineInfo.extents.height, renderPass,
                                                               {swapchainReferences.imageViews[imageIndex], depthMapImageView});
 
             std::vector<VkClearValue> clearValues = {colorClearValue, depthClearValue};
             VkRenderPassBeginInfo vkRenderPassBeginInfo{};
             vkRenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            vkRenderPassBeginInfo.renderPass = vulkanHandles.renderPass;
+            vkRenderPassBeginInfo.renderPass = renderPass;
             vkRenderPassBeginInfo.framebuffer = renderFrame.frameBuffer;
             vkRenderPassBeginInfo.renderArea = viewRect;
             vkRenderPassBeginInfo.clearValueCount = clearValues.size();
@@ -668,7 +685,10 @@ int main() {
 
             mvp.view = glm::lookAt(camera.eye, camera.center, camera.up);
             lightInformation.cameraPosition = camera.center;
-            lightInformation.position = glm::vec3(0, 10, 0);
+            glm::mat4 model = glm::mat4(1);
+            model = glm::rotate(model, angle, glm::vec3(0, 0, -1));
+            angle += 0.001;
+            lightInformation.position = model * glm::vec4(0, 10, 0, 1);
             vulkanMapMemoryWithFlush(vulkanHandles, lightInformationBuffer, &lightInformation);
 
             for (int j = 0; j < terrainPatches.size(); ++j) {
@@ -678,7 +698,7 @@ int main() {
             CommandBufferUtils::vulkanBeginCommandBuffer(vulkanHandles, renderFrame.commandBuffer, 0);
             {
                 vkCmdBeginRenderPass(renderFrame.commandBuffer, &vkRenderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-                vkCmdBindPipeline(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanHandles.pipeline);
+                vkCmdBindPipeline(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
                 VkDeviceSize offset = 0;
 
                 vkCmdBindDescriptorSets(renderFrame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkPipelineLayout, 0,
@@ -689,7 +709,7 @@ int main() {
                 for (int j = 0; j < terrainPatches.size(); ++j) {
                     terrainPatches[j].mvp.view = mvp.view;
                     terrainPatches[j].mvp.projetion = mvp.projetion;
-                    terrainPatches[j].tessInfo.tessLevelInner = globalInnerTess;
+//                    terrainPatches[j].tessInfo.tessLevelInner = globalInnerTess;
                     terrainPatches[j].tessInfo.tessLevelOuter = glm::vec3(globalOuterTess);
                     vulkanMapMemoryWithFlush(vulkanHandles, terrainPatches[j].mvpUniform, &terrainPatches[j].mvp);
                     vulkanMapMemoryWithFlush(vulkanHandles, terrainPatches[j].tessInfoUniform, &terrainPatches[j].tessInfo);

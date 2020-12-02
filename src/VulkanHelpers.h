@@ -77,13 +77,13 @@ VkShaderModule vulkanCreateShaderModule(const VulkanHandles vulkanHandles, const
 }
 
 
-VkFramebuffer vulkanCreateFrameBuffer(const VulkanHandles vulkanHandles, uint32_t width, uint32_t height,
+VkFramebuffer vulkanCreateFrameBuffer(const VulkanHandles vulkanHandles, uint32_t width, uint32_t height,VkRenderPass renderPass,
                                       std::vector<VkImageView> attachments) {
     VkFramebufferCreateInfo vkFramebufferCreateInfo{};
     vkFramebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     vkFramebufferCreateInfo.attachmentCount = attachments.size();
     vkFramebufferCreateInfo.pAttachments = attachments.data();
-    vkFramebufferCreateInfo.renderPass = vulkanHandles.renderPass;
+    vkFramebufferCreateInfo.renderPass = renderPass;
     vkFramebufferCreateInfo.width = width;
     vkFramebufferCreateInfo.height = height;
     vkFramebufferCreateInfo.layers = 1;
