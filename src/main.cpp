@@ -413,7 +413,7 @@ buildTerrainPatches(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDevi
                                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
     glm::vec3 totalSize = patchSize * glm::vec3(xAmount, 0, zAmount);
-    glm::vec3 uvStep = glm::vec3(1, 1, 1) / glm::vec3(xAmount, 0, zAmount);
+    glm::vec3 uvStep = glm::vec3(1.0, 1, 1.0) / glm::vec3(xAmount, 0, zAmount);
     for (int x = 0; x < xAmount; x++) {
         for (int z = 0; z < zAmount; z++) {
             TerrainPatch terrainPatch{};
@@ -603,7 +603,7 @@ int main() {
                                          VK_FORMAT_R32G32B32A32_SFLOAT,
                                          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                                          VK_IMAGE_ASPECT_COLOR_BIT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_FALSE);
 
     Buffer stagingBuffer = allocateExclusiveBuffer(vulkanHandles, physicalDeviceInfo, image1->width * image1->height * 4 * 4,
                                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
@@ -642,7 +642,7 @@ int main() {
 
 
     terrainPatches = buildTerrainPatches(vulkanHandles, physicalDeviceInfo, transferStructure, 2, 2,
-                                         glm::vec3(2, 2, 2), glm::vec3(1, -3, 1), vkDescriptorSetLayout2, vkDescriptorSetLayout1, descriptorPool);
+                                         glm::vec3(2, 2, 2), glm::vec3(-2, -3, -2), vkDescriptorSetLayout2, vkDescriptorSetLayout1, descriptorPool);
 
 
     int renderFramesAmount = 2;
@@ -653,8 +653,7 @@ int main() {
     float frameNumber = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-        float flash = std::abs(std::sin(frameNumber / 500.f));
-        colorClearValue.color = {{0.0f, 0.0f, flash, 1.0f}};
+        colorClearValue.color = {{11.f / 255.f, 13.f / 255.f, 14.f / 255.f, 1.0f}};
 
         for (int i = 0; i < renderFramesAmount; ++i) {
             RenderFrame &renderFrame = renderFrames[i];
@@ -688,7 +687,7 @@ int main() {
             glm::mat4 model = glm::mat4(1);
             model = glm::rotate(model, angle, glm::vec3(0, 0, -1));
             angle += 0.001;
-            lightInformation.position = model * glm::vec4(0, 10, 0, 1);
+            lightInformation.position = model * glm::vec4(0, -2, 0, 1);
             vulkanMapMemoryWithFlush(vulkanHandles, lightInformationBuffer, &lightInformation);
 
             for (int j = 0; j < terrainPatches.size(); ++j) {
@@ -709,7 +708,6 @@ int main() {
                 for (int j = 0; j < terrainPatches.size(); ++j) {
                     terrainPatches[j].mvp.view = mvp.view;
                     terrainPatches[j].mvp.projetion = mvp.projetion;
-//                    terrainPatches[j].tessInfo.tessLevelInner = globalInnerTess;
                     terrainPatches[j].tessInfo.tessLevelOuter = glm::vec3(globalOuterTess);
                     vulkanMapMemoryWithFlush(vulkanHandles, terrainPatches[j].mvpUniform, &terrainPatches[j].mvp);
                     vulkanMapMemoryWithFlush(vulkanHandles, terrainPatches[j].tessInfoUniform, &terrainPatches[j].tessInfo);

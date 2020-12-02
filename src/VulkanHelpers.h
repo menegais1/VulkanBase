@@ -279,19 +279,19 @@ vulkanCreateImageView2D(VulkanHandles vulkanHandles, VkImage image, VkFormat for
 
 }
 
-VkSampler vulkanCreateSampler2D(VulkanHandles vulkanHandles, VkSamplerAddressMode addressMode) {
+VkSampler vulkanCreateSampler2D(VulkanHandles vulkanHandles, VkSamplerAddressMode addressMode, VkBool32 unnormalizedCoordinates) {
     VkSamplerCreateInfo textureSamplerInfo{};
     textureSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     textureSamplerInfo.addressModeU = addressMode;
     textureSamplerInfo.addressModeV = addressMode;
     textureSamplerInfo.addressModeW = addressMode;
     textureSamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
-    textureSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    textureSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     textureSamplerInfo.anisotropyEnable = VK_FALSE;
     textureSamplerInfo.compareEnable = VK_FALSE;
     textureSamplerInfo.minFilter = VK_FILTER_LINEAR;
     textureSamplerInfo.magFilter = VK_FILTER_LINEAR;
-    textureSamplerInfo.unnormalizedCoordinates = VK_FALSE;
+    textureSamplerInfo.unnormalizedCoordinates = unnormalizedCoordinates;
 
     VkSampler sampler;
     VK_ASSERT(vkCreateSampler(vulkanHandles.device, &textureSamplerInfo, nullptr, &sampler));
@@ -303,7 +303,7 @@ Texture2D
 createTexture2D(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceInfo, void *data, VkExtent2D extents,
                 VkFormat format, VkImageUsageFlags usage,
                 VkImageAspectFlags aspectMask, VkSamplerAddressMode addressMode,
-                VkMemoryPropertyFlagBits memoryPropertyFlags) {
+                VkMemoryPropertyFlagBits memoryPropertyFlags, VkBool32 unnormalizedCoordinates) {
     Texture2D texture2D{};
     texture2D.data = data;
     texture2D.width = extents.width;
@@ -317,7 +317,7 @@ createTexture2D(VulkanHandles vulkanHandles, PhysicalDeviceInfo physicalDeviceIn
     VK_ASSERT(vkBindImageMemory(vulkanHandles.device, texture2D.image, texture2D.deviceMemory, 0));
 
     texture2D.imageView = vulkanCreateImageView2D(vulkanHandles, texture2D.image, format, aspectMask);
-    texture2D.sampler = vulkanCreateSampler2D(vulkanHandles, addressMode);
+    texture2D.sampler = vulkanCreateSampler2D(vulkanHandles, addressMode,unnormalizedCoordinates);
     return texture2D;
 }
 
